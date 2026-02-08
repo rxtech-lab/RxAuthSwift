@@ -5,16 +5,22 @@ public struct RxSignInView<Header: View>: View {
     @Bindable private var manager: OAuthManager
     private let appearance: RxSignInAppearance
     private let customHeader: Header?
+    private let onAuthSuccess: (() -> Void)?
+    private let onAuthFailed: ((Error) -> Void)?
 
     // MARK: - Simple Init (appearance struct)
 
     public init(
         manager: OAuthManager,
-        appearance: RxSignInAppearance = RxSignInAppearance()
+        appearance: RxSignInAppearance = RxSignInAppearance(),
+        onAuthSuccess: (() -> Void)? = nil,
+        onAuthFailed: ((Error) -> Void)? = nil
     ) where Header == Never {
         self.manager = manager
         self.appearance = appearance
         self.customHeader = nil
+        self.onAuthSuccess = onAuthSuccess
+        self.onAuthFailed = onAuthFailed
     }
 
     // MARK: - Advanced Init (ViewBuilder for custom header)
@@ -22,11 +28,15 @@ public struct RxSignInView<Header: View>: View {
     public init(
         manager: OAuthManager,
         appearance: RxSignInAppearance = RxSignInAppearance(),
+        onAuthSuccess: (() -> Void)? = nil,
+        onAuthFailed: ((Error) -> Void)? = nil,
         @ViewBuilder header: () -> Header
     ) {
         self.manager = manager
         self.appearance = appearance
         self.customHeader = header()
+        self.onAuthSuccess = onAuthSuccess
+        self.onAuthFailed = onAuthFailed
     }
 
     public var body: some View {
@@ -65,8 +75,9 @@ public struct RxSignInView<Header: View>: View {
                         Task {
                             do {
                                 try await manager.authenticate()
+                                onAuthSuccess?()
                             } catch {
-                                // Error is handled by the manager
+                                onAuthFailed?(error)
                             }
                         }
                     }
