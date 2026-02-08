@@ -89,6 +89,7 @@ public struct RxSignInView<Header: View>: View {
             VStack(spacing: 8) {
                 Text(appearance.title)
                     .font(.largeTitle.bold())
+                    .foregroundStyle(.primary)
                     .multilineTextAlignment(.center)
 
                 Text(appearance.subtitle)
