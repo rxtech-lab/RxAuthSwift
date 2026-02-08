@@ -111,10 +111,28 @@ RxSignInView(
 )
 ```
 
+**With callbacks:**
+
+```swift
+RxSignInView(
+    manager: authManager,
+    onAuthSuccess: {
+        // Navigate to home, fetch user data, etc.
+    },
+    onAuthFailed: { error in
+        // Log error, show custom alert, etc.
+    }
+)
+```
+
 **Advanced (fully custom header with ViewBuilder):**
 
 ```swift
-RxSignInView(manager: authManager) {
+RxSignInView(
+    manager: authManager,
+    onAuthSuccess: { print("Signed in!") },
+    onAuthFailed: { error in print("Failed: \(error)") }
+) {
     VStack {
         Image("Logo")
             .resizable()
