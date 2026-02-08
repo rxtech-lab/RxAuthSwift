@@ -4,6 +4,7 @@ public struct AnimatedGradientBackground: View {
     let accentColor: Color
     let secondaryColor: Color
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var animateOrbs = false
 
     public init(accentColor: Color = .blue, secondaryColor: Color = .purple) {
@@ -13,12 +14,17 @@ public struct AnimatedGradientBackground: View {
 
     public var body: some View {
         GeometryReader { geometry in
+            let baseColor: Color = colorScheme == .dark ? Color(white: 0.05) : Color(white: 0.97)
+            let accentOpacity: Double = colorScheme == .dark ? 0.15 : 0.10
+            let secondaryOpacity: Double = colorScheme == .dark ? 0.12 : 0.08
+            let tertiaryOpacity: Double = colorScheme == .dark ? 0.10 : 0.06
+
             ZStack {
-                Color(white: 0.05).environment(\.colorScheme, .dark)
+                baseColor
 
                 // Orb 1
                 Circle()
-                    .fill(accentColor.opacity(0.15))
+                    .fill(accentColor.opacity(accentOpacity))
                     .frame(width: geometry.size.width * 0.7)
                     .blur(radius: 60)
                     .offset(
@@ -28,7 +34,7 @@ public struct AnimatedGradientBackground: View {
 
                 // Orb 2
                 Circle()
-                    .fill(secondaryColor.opacity(0.12))
+                    .fill(secondaryColor.opacity(secondaryOpacity))
                     .frame(width: geometry.size.width * 0.6)
                     .blur(radius: 50)
                     .offset(
@@ -38,7 +44,7 @@ public struct AnimatedGradientBackground: View {
 
                 // Orb 3
                 Circle()
-                    .fill(Color.cyan.opacity(0.1))
+                    .fill(Color.cyan.opacity(tertiaryOpacity))
                     .frame(width: geometry.size.width * 0.5)
                     .blur(radius: 40)
                     .offset(
