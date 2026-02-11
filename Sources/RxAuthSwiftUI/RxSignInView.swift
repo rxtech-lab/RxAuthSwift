@@ -1,5 +1,5 @@
-import SwiftUI
 import RxAuthSwift
+import SwiftUI
 
 public struct RxSignInView<Header: View>: View {
     @Bindable private var manager: OAuthManager
