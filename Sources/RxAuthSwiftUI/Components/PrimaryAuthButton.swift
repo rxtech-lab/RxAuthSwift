@@ -43,7 +43,7 @@ public struct PrimaryAuthButton: View {
         .rxGlassProminentButton()
         .tint(accentColor)
         .disabled(isLoading)
-        .accessibilityIdentifier("primaryAuthButton")
+        .accessibilityIdentifier("sign-in-button")
         .accessibilityHint(isLoading ? "Authentication in progress" : "Double tap to sign in")
     }
 }

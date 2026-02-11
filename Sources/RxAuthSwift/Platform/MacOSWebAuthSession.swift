@@ -6,6 +6,7 @@ import WebKit
 final class MacOSWebAuthSession: NSObject, WebAuthSessionProvider {
     private var window: NSWindow?
     private var webView: WKWebView?
+    private var urlTextField: NSTextField?
     private var continuation: CheckedContinuation<URL, any Error>?
     private var callbackScheme: String = ""
 
@@ -25,6 +26,28 @@ final class MacOSWebAuthSession: NSObject, WebAuthSessionProvider {
         webView.navigationDelegate = self
         self.webView = webView
 
+        let urlField = NSTextField()
+        urlField.isEditable = false
+        urlField.isSelectable = true
+        urlField.isBordered = true
+        urlField.bezelStyle = .roundedBezel
+        urlField.font = .systemFont(ofSize: 13)
+        urlField.lineBreakMode = .byTruncatingTail
+        urlField.cell?.truncatesLastVisibleLine = true
+        urlField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        urlField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        urlField.stringValue = url.absoluteString
+        self.urlTextField = urlField
+
+        let toolbar = NSStackView(views: [urlField])
+        toolbar.orientation = .horizontal
+        toolbar.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        toolbar.setHuggingPriority(.required, for: .horizontal)
+
+        let container = NSStackView(views: [toolbar, webView])
+        container.orientation = .vertical
+        container.spacing = 0
+
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 700),
             styleMask: [.titled, .closable, .resizable],
@@ -32,7 +55,7 @@ final class MacOSWebAuthSession: NSObject, WebAuthSessionProvider {
             defer: false
         )
         window.title = "Sign In"
-        window.contentView = webView
+        window.contentView = container
         window.center()
         window.delegate = self
         window.makeKeyAndOrderFront(nil)
@@ -42,10 +65,12 @@ final class MacOSWebAuthSession: NSObject, WebAuthSessionProvider {
     }
 
     private func complete(with result: Result<URL, any Error>) {
-        window?.close()
-        window = nil
         webView?.navigationDelegate = nil
         webView = nil
+        urlTextField = nil
+
+        window?.orderOut(nil)
+        window = nil
 
         let cont = continuation
         continuation = nil
@@ -74,6 +99,12 @@ extension MacOSWebAuthSession: WKNavigationDelegate {
             }
             decisionHandler(.cancel)
             self.complete(with: .success(url))
+        }
+    }
+
+    nonisolated func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        MainActor.assumeIsolated {
+            self.urlTextField?.stringValue = webView.url?.absoluteString ?? ""
         }
     }
 
