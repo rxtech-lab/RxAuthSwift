@@ -47,9 +47,13 @@ public final class OAuthManager: Sendable {
         } else if tokenStorage.getRefreshToken() != nil {
             do {
                 try await refreshTokenIfNeeded()
+                startTokenRefreshTimer()
                 logger.info("Refreshed token from existing session")
             } catch {
                 logger.warning("Token refresh failed: \(error.localizedDescription)")
+                // Ensure stale tokens are fully cleared so that subsequent
+                // calls to checkExistingAuth() don't retry a failed refresh.
+                try? tokenStorage.clearAll()
                 authState = .unauthenticated
             }
         } else {
@@ -86,6 +90,10 @@ public final class OAuthManager: Sendable {
             try tokenStorage.clearAll()
         } catch {
             logger.error("Failed to clear token storage: \(error.localizedDescription)")
+            // Attempt to clear individual tokens even if clearAll() fails,
+            // so that a partial failure doesn't leave stale tokens behind.
+            try? tokenStorage.deleteAccessToken()
+            try? tokenStorage.deleteRefreshToken()
         }
 
         currentUser = nil
