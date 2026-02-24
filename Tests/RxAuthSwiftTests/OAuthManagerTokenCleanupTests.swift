@@ -4,7 +4,7 @@ import Testing
 
 // MARK: - Mock Token Storage (clearAll fails but individual deletes work)
 
-private final class PartiallyFailingTokenStorage: TokenStorageProtocol, @unchecked Sendable {
+private final class ClearAllFailingTokenStorage: TokenStorageProtocol, @unchecked Sendable {
     private let lock = NSLock()
     private var accessToken: String?
     private var refreshToken: String?
@@ -97,9 +97,28 @@ private final class MockURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+// MARK: - Thread-safe Counter
+
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _value
+    }
+
+    func increment() {
+        lock.lock()
+        defer { lock.unlock() }
+        _value += 1
+    }
+}
+
 // MARK: - Tests
 
-@Suite("OAuthManager Token Cleanup")
+@Suite("OAuthManager Token Cleanup", .serialized)
 struct OAuthManagerTokenCleanupTests {
     private func makeConfig() -> RxAuthConfiguration {
         RxAuthConfiguration(
@@ -132,7 +151,7 @@ struct OAuthManagerTokenCleanupTests {
     }
 
     @Test @MainActor func logoutClearsTokensWhenClearAllFails() async throws {
-        let storage = PartiallyFailingTokenStorage()
+        let storage = ClearAllFailingTokenStorage()
         try storage.saveAccessToken("access-123")
         try storage.saveRefreshToken("refresh-456")
         try storage.saveExpiresAt(Date().addingTimeInterval(3600))
@@ -166,10 +185,7 @@ struct OAuthManagerTokenCleanupTests {
     }
 
     @Test @MainActor func checkExistingAuthClearsStaleTokensAfterRefreshFailure() async throws {
-        // Register mock URL protocol to return 400 for token refresh
-        URLProtocol.registerClass(MockURLProtocol.self)
-        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
-
+        // Set up mock handler before registering protocol to avoid race conditions
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -179,6 +195,9 @@ struct OAuthManagerTokenCleanupTests {
             )!
             return (response, Data())
         }
+
+        URLProtocol.registerClass(MockURLProtocol.self)
+        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
 
         let storage = InMemoryTokenStorage()
         // Set up stale tokens: expired access token + refresh token
@@ -201,16 +220,9 @@ struct OAuthManagerTokenCleanupTests {
     }
 
     @Test @MainActor func checkExistingAuthDoesNotRetryAfterTokensCleared() async throws {
-        // Register mock URL protocol to track requests
-        URLProtocol.registerClass(MockURLProtocol.self)
-        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
-
-        var requestCount = 0
-        let lock = NSLock()
+        let counter = LockedCounter()
         MockURLProtocol.requestHandler = { request in
-            lock.lock()
-            requestCount += 1
-            lock.unlock()
+            counter.increment()
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: 400,
@@ -219,6 +231,9 @@ struct OAuthManagerTokenCleanupTests {
             )!
             return (response, Data())
         }
+
+        URLProtocol.registerClass(MockURLProtocol.self)
+        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
 
         let storage = InMemoryTokenStorage()
         try storage.saveAccessToken("expired-access")
@@ -234,12 +249,12 @@ struct OAuthManagerTokenCleanupTests {
         await manager.checkExistingAuth()
         #expect(manager.authState == .unauthenticated)
 
-        let firstCallCount = requestCount
+        let firstCallCount = counter.value
 
         // Second call: no tokens should remain, so no refresh attempt
         await manager.checkExistingAuth()
         #expect(manager.authState == .unauthenticated)
-        #expect(requestCount == firstCallCount, "Should not make additional refresh requests after tokens are cleared")
+        #expect(counter.value == firstCallCount, "Should not make additional refresh requests after tokens are cleared")
     }
 
     @Test @MainActor func fullCycleRefreshFailureThenRecheck() async throws {
@@ -248,9 +263,6 @@ struct OAuthManagerTokenCleanupTests {
         // 2. Refresh fails with 400
         // 3. Tokens should be fully cleared
         // 4. Subsequent checkExistingAuth() should NOT attempt to refresh
-
-        URLProtocol.registerClass(MockURLProtocol.self)
-        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
 
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
@@ -261,6 +273,9 @@ struct OAuthManagerTokenCleanupTests {
             )!
             return (response, Data())
         }
+
+        URLProtocol.registerClass(MockURLProtocol.self)
+        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
 
         let storage = InMemoryTokenStorage()
         try storage.saveAccessToken("old-access")
