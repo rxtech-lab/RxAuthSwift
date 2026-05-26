@@ -17,10 +17,11 @@ struct testApp: App {
             issuer: "https://auth.rxlab.app",
             clientID: "client_8605760939b8494c8bfe29c77ae7ee7f",
             redirectURI: "rxauth://callback",
-            passkeyChallengePath: "/api/auth/passkey/authenticate/options",
-            passkeyVerificationPath: "/api/auth/passkey/authenticate/verify",
-            passkeyRegistrationChallengePath: "/api/auth/passkey/register/options",
-            passkeyRegistrationVerificationPath: "/api/auth/passkey/register/verify",
+            scopes: ["openid"],
+            passkeyChallengePath: "/api/oauth/passkey/authenticate/options",
+            passkeyVerificationPath: "/api/oauth/passkey/authenticate/verify",
+            passkeyRegistrationChallengePath: "/api/oauth/passkey/register/options",
+            passkeyRegistrationVerificationPath: "/api/oauth/passkey/register/verify",
             passkeyRelyingPartyIdentifier: "rxlab.app"
         )
 

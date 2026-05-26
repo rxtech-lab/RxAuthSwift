@@ -34,6 +34,16 @@ struct ContentView: View {
                         print("Auth failed: \(error)")
                     }
                 )
+                #if os(macOS)
+                .onChange(of: manager.errorMessage) { _, newValue in
+                    if newValue != nil {
+                        Task {
+                            try? await Task.sleep(for: .seconds(5))
+                            manager.clearError()
+                        }
+                    }
+                }
+                #endif
             case .authenticated:
                 authenticatedView
             }

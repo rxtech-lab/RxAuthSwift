@@ -379,8 +379,8 @@ public final class OAuthManager: Sendable {
         verificationRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         verificationRequest.httpBody = try JSONEncoder().encode(PasskeyVerificationRequest(
             clientID: configuration.clientID,
-            requestID: options.requestID,
-            username: username.nilIfBlank,
+            sessionID: options.sessionID,
+            scope: configuration.scopes.joined(separator: " "),
             assertion: assertion
         ))
 
@@ -453,9 +453,8 @@ public final class OAuthManager: Sendable {
         verificationRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         verificationRequest.httpBody = try JSONEncoder().encode(PasskeyRegistrationVerificationRequest(
             clientID: configuration.clientID,
-            requestID: options.requestID,
-            username: trimmedUsername,
-            name: name.nilIfBlank,
+            sessionID: options.sessionID,
+            scope: configuration.scopes.joined(separator: " "),
             registration: registration
         ))
 
@@ -513,7 +512,11 @@ public final class OAuthManager: Sendable {
             let bodyString = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
             let url = request.url?.absoluteString ?? "<unknown URL>"
             logger.error("Token request failed: \(request.httpMethod ?? "?") \(url) -> HTTP \(httpResponse.statusCode); body: \(bodyString)")
-            throw OAuthError.tokenExchangeFailed("HTTP \(httpResponse.statusCode): \(bodyString)")
+
+            if let parsed = try? JSONDecoder().decode(OAuthErrorResponse.self, from: data) {
+                throw OAuthError.tokenExchangeFailed(parsed.userFacingMessage)
+            }
+            throw OAuthError.tokenExchangeFailed("HTTP \(httpResponse.statusCode)")
         }
 
         return try JSONDecoder().decode(TokenResponse.self, from: data)
@@ -577,6 +580,26 @@ public final class OAuthManager: Sendable {
 
 // MARK: - Token Response
 
+private struct OAuthErrorResponse: Decodable {
+    let error: String?
+    let errorDescription: String?
+
+    enum CodingKeys: String, CodingKey {
+        case error
+        case errorDescription = "error_description"
+    }
+
+    var userFacingMessage: String {
+        if let description = errorDescription, !description.isEmpty {
+            return description
+        }
+        if let error, !error.isEmpty {
+            return error.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+        return "Authentication failed"
+    }
+}
+
 private struct TokenResponse: Decodable {
     let accessToken: String
     let refreshToken: String?
@@ -619,12 +642,14 @@ private struct SignupRequest: Encodable {
 
 private struct PasskeyChallengeResponse: Decodable {
     let challenge: String
-    let requestID: String?
+    let sessionID: String?
     let relyingPartyIdentifier: String?
     let allowedCredentialIDs: [String]
 
     enum CodingKeys: String, CodingKey {
         case challenge
+        case sessionID
+        case sessionId
         case requestID
         case requestId
         case relyingPartyIdentifier
@@ -632,12 +657,15 @@ private struct PasskeyChallengeResponse: Decodable {
         case rpId
         case allowedCredentialIDs
         case allowedCredentials
+        case allowCredentials
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         challenge = try container.decode(String.self, forKey: .challenge)
-        requestID = try container.decodeIfPresent(String.self, forKey: .requestID)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+            ?? container.decodeIfPresent(String.self, forKey: .sessionId)
+            ?? container.decodeIfPresent(String.self, forKey: .requestID)
             ?? container.decodeIfPresent(String.self, forKey: .requestId)
         relyingPartyIdentifier = try container.decodeIfPresent(String.self, forKey: .relyingPartyIdentifier)
             ?? container.decodeIfPresent(String.self, forKey: .relyingPartyId)
@@ -646,6 +674,8 @@ private struct PasskeyChallengeResponse: Decodable {
         if let ids = try container.decodeIfPresent([String].self, forKey: .allowedCredentialIDs) {
             allowedCredentialIDs = ids
         } else if let credentials = try container.decodeIfPresent([AllowedCredential].self, forKey: .allowedCredentials) {
+            allowedCredentialIDs = credentials.map(\.id)
+        } else if let credentials = try container.decodeIfPresent([AllowedCredential].self, forKey: .allowCredentials) {
             allowedCredentialIDs = credentials.map(\.id)
         } else {
             allowedCredentialIDs = []
@@ -673,133 +703,182 @@ private struct PasskeyRegistrationChallengeResponse: Decodable {
     let challenge: String
     let userID: String
     let username: String?
-    let requestID: String?
+    let sessionID: String?
     let relyingPartyIdentifier: String?
 
     enum CodingKeys: String, CodingKey {
         case challenge
         case userID
         case userId
+        case user
         case username
         case userName
+        case sessionID
+        case sessionId
         case requestID
         case requestId
         case relyingPartyIdentifier
         case relyingPartyId
         case rpId
+        case rp
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         challenge = try container.decode(String.self, forKey: .challenge)
-        userID = try container.decodeIfPresent(String.self, forKey: .userID)
-            ?? container.decode(String.self, forKey: .userId)
-        username = try container.decodeIfPresent(String.self, forKey: .username)
-            ?? container.decodeIfPresent(String.self, forKey: .userName)
-        requestID = try container.decodeIfPresent(String.self, forKey: .requestID)
+
+        if let flatUserID = try container.decodeIfPresent(String.self, forKey: .userID)
+            ?? container.decodeIfPresent(String.self, forKey: .userId)
+        {
+            userID = flatUserID
+            username = try container.decodeIfPresent(String.self, forKey: .username)
+                ?? container.decodeIfPresent(String.self, forKey: .userName)
+        } else if let user = try container.decodeIfPresent(NestedUser.self, forKey: .user) {
+            userID = user.id
+            username = user.name ?? user.displayName
+        } else {
+            userID = try container.decode(String.self, forKey: .userID)
+            username = nil
+        }
+
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+            ?? container.decodeIfPresent(String.self, forKey: .sessionId)
+            ?? container.decodeIfPresent(String.self, forKey: .requestID)
             ?? container.decodeIfPresent(String.self, forKey: .requestId)
-        relyingPartyIdentifier = try container.decodeIfPresent(String.self, forKey: .relyingPartyIdentifier)
+
+        if let rpID = try container.decodeIfPresent(String.self, forKey: .relyingPartyIdentifier)
             ?? container.decodeIfPresent(String.self, forKey: .relyingPartyId)
             ?? container.decodeIfPresent(String.self, forKey: .rpId)
+        {
+            relyingPartyIdentifier = rpID
+        } else if let rp = try container.decodeIfPresent(NestedRP.self, forKey: .rp) {
+            relyingPartyIdentifier = rp.id
+        } else {
+            relyingPartyIdentifier = nil
+        }
+    }
+
+    private struct NestedUser: Decodable {
+        let id: String
+        let name: String?
+        let displayName: String?
+    }
+
+    private struct NestedRP: Decodable {
+        let id: String
     }
 }
 
 private struct PasskeyVerificationRequest: Encodable {
     let clientID: String
-    let requestID: String?
-    let username: String?
-    let id: String
-    let rawID: String
-    let type: String
-    let response: Response
-    let clientExtensionResults: [String: String]
+    let sessionID: String?
+    let scope: String?
+    let credential: Credential
 
     enum CodingKeys: String, CodingKey {
         case clientID = "client_id"
-        case requestID = "request_id"
-        case username
-        case id
-        case rawID = "rawId"
-        case type
-        case response
-        case clientExtensionResults
+        case sessionID = "session_id"
+        case scope
+        case credential
     }
 
-    struct Response: Encodable {
-        let clientDataJSON: String
-        let authenticatorData: String
-        let signature: String
-        let userHandle: String
+    struct Credential: Encodable {
+        let id: String
+        let rawID: String
+        let type: String
+        let response: Response
+        let clientExtensionResults: [String: String]
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case rawID = "rawId"
+            case type
+            case response
+            case clientExtensionResults
+        }
+
+        struct Response: Encodable {
+            let clientDataJSON: String
+            let authenticatorData: String
+            let signature: String
+            let userHandle: String
+        }
     }
 }
 
 private struct PasskeyRegistrationVerificationRequest: Encodable {
     let clientID: String
-    let requestID: String?
-    let username: String
-    let name: String?
-    let id: String
-    let rawID: String
-    let type: String
-    let response: Response
-    let clientExtensionResults: [String: String]
+    let sessionID: String?
+    let scope: String?
+    let credential: Credential
 
     enum CodingKeys: String, CodingKey {
         case clientID = "client_id"
-        case requestID = "request_id"
-        case username
-        case name
-        case id
-        case rawID = "rawId"
-        case type
-        case response
-        case clientExtensionResults
+        case sessionID = "session_id"
+        case scope
+        case credential
     }
 
-    struct Response: Encodable {
-        let clientDataJSON: String
-        let attestationObject: String?
+    struct Credential: Encodable {
+        let id: String
+        let rawID: String
+        let type: String
+        let response: Response
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case rawID = "rawId"
+            case type
+            case response
+        }
+
+        struct Response: Encodable {
+            let clientDataJSON: String
+            let attestationObject: String?
+        }
     }
 }
 
 #if os(macOS)
 private extension PasskeyVerificationRequest {
-    init(clientID: String, requestID: String?, username: String?, assertion: PasskeyAssertion) {
+    init(clientID: String, sessionID: String?, scope: String?, assertion: PasskeyAssertion) {
         let credentialID = Base64URL.encode(assertion.credentialID)
         self.init(
             clientID: clientID,
-            requestID: requestID,
-            username: username,
-            id: credentialID,
-            rawID: credentialID,
-            type: "public-key",
-            response: Response(
-                clientDataJSON: Base64URL.encode(assertion.rawClientDataJSON),
-                authenticatorData: Base64URL.encode(assertion.rawAuthenticatorData),
-                signature: Base64URL.encode(assertion.signature),
-                userHandle: Base64URL.encode(assertion.userID)
-            ),
-            clientExtensionResults: [:]
+            sessionID: sessionID,
+            scope: scope.nilIfBlank,
+            credential: Credential(
+                id: credentialID,
+                rawID: credentialID,
+                type: "public-key",
+                response: Credential.Response(
+                    clientDataJSON: Base64URL.encode(assertion.rawClientDataJSON),
+                    authenticatorData: Base64URL.encode(assertion.rawAuthenticatorData),
+                    signature: Base64URL.encode(assertion.signature),
+                    userHandle: Base64URL.encode(assertion.userID)
+                ),
+                clientExtensionResults: [:]
+            )
         )
     }
 }
 
 private extension PasskeyRegistrationVerificationRequest {
-    init(clientID: String, requestID: String?, username: String, name: String?, registration: PasskeyRegistration) {
+    init(clientID: String, sessionID: String?, scope: String?, registration: PasskeyRegistration) {
         let credentialID = Base64URL.encode(registration.credentialID)
         self.init(
             clientID: clientID,
-            requestID: requestID,
-            username: username,
-            name: name,
-            id: credentialID,
-            rawID: credentialID,
-            type: "public-key",
-            response: Response(
-                clientDataJSON: Base64URL.encode(registration.rawClientDataJSON),
-                attestationObject: registration.rawAttestationObject.map(Base64URL.encode)
-            ),
-            clientExtensionResults: [:]
+            sessionID: sessionID,
+            scope: scope.nilIfBlank,
+            credential: Credential(
+                id: credentialID,
+                rawID: credentialID,
+                type: "public-key",
+                response: Credential.Response(
+                    clientDataJSON: Base64URL.encode(registration.rawClientDataJSON),
+                    attestationObject: registration.rawAttestationObject.map(Base64URL.encode)
+                )
+            )
         )
     }
 }
