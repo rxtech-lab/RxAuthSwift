@@ -315,4 +315,215 @@ struct OAuthManagerTokenCleanupTests {
         #expect(manager.authState == .authenticated)
         #expect(manager.currentUser?.id == "user-1")
     }
+
+    // MARK: - Native Credential Tests
+
+    @Test @MainActor func authenticateWithUsernamePasswordPostsDirectTokenRequest() async throws {
+        let requestBodies = LockedRequestBodies()
+        MockURLProtocol.requestHandler = { request in
+            if request.url?.path == "/api/oauth/token" {
+                requestBodies.append(requestBodyString(from: request))
+                let tokenJSON = #"{"access_token":"native-access","refresh_token":"native-refresh","expires_in":3600,"token_type":"Bearer"}"#
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, tokenJSON.data(using: .utf8)!)
+            }
+
+            let userInfoJSON = #"{"id":"user-1","name":"Native User","email":"native@example.com"}"#
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, userInfoJSON.data(using: .utf8)!)
+        }
+
+        URLProtocol.registerClass(MockURLProtocol.self)
+        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
+
+        let storage = InMemoryTokenStorage()
+        let manager = OAuthManager(
+            configuration: makeConfig(),
+            tokenStorage: storage
+        )
+
+        try await manager.authenticate(
+            username: "qa+user@example.com",
+            password: "p@ss word"
+        )
+
+        #expect(manager.authState == .authenticated)
+        #expect(manager.currentUser?.email == "native@example.com")
+        #expect(storage.getAccessToken() == "native-access")
+        #expect(storage.getRefreshToken() == "native-refresh")
+
+        let body = requestBodies.values.first ?? ""
+        #expect(body.contains("grant_type=password"))
+        #expect(body.contains("username=qa%2Buser%40example.com"))
+        #expect(body.contains("password=p%40ss%20word"))
+        #expect(body.contains("client_id=test-client"))
+    }
+
+    @Test @MainActor func authenticateWithUsernamePasswordRejectsBlankCredentials() async throws {
+        let manager = OAuthManager(
+            configuration: makeConfig(),
+            tokenStorage: InMemoryTokenStorage()
+        )
+
+        do {
+            try await manager.authenticate(username: "  ", password: "")
+            Issue.record("Expected invalid credentials error")
+        } catch OAuthError.invalidCredentials {
+            #expect(manager.errorMessage == OAuthError.invalidCredentials.localizedDescription)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test @MainActor func signUpPostsNativeSignupRequest() async throws {
+        let requestBodies = LockedRequestBodies()
+        MockURLProtocol.requestHandler = { request in
+            if request.url?.path == "/api/oauth/signup" {
+                requestBodies.append(requestBodyString(from: request))
+                let tokenJSON = #"{"access_token":"signup-access","refresh_token":"signup-refresh","expires_in":3600,"token_type":"Bearer"}"#
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, tokenJSON.data(using: .utf8)!)
+            }
+
+            let userInfoJSON = #"{"id":"user-2","name":"Signup User","email":"signup@example.com"}"#
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, userInfoJSON.data(using: .utf8)!)
+        }
+
+        URLProtocol.registerClass(MockURLProtocol.self)
+        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
+
+        let storage = InMemoryTokenStorage()
+        let manager = OAuthManager(
+            configuration: makeConfig(),
+            tokenStorage: storage
+        )
+
+        try await manager.signUp(
+            username: "signup@example.com",
+            password: "create-password",
+            name: "Signup User"
+        )
+
+        #expect(manager.authState == .authenticated)
+        #expect(manager.currentUser?.id == "user-2")
+        #expect(storage.getAccessToken() == "signup-access")
+
+        let body = requestBodies.values.first ?? ""
+        #expect(body.contains(#""client_id":"test-client""#))
+        #expect(body.contains(#""username":"signup@example.com""#))
+        #expect(body.contains(#""password":"create-password""#))
+        #expect(body.contains(#""name":"Signup User""#))
+    }
+
+    @Test @MainActor func signUpReturnsVerificationRequiredOn201() async throws {
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/oauth/signup")
+            let verificationJSON = #"{"user_id":"40ff1a29-39e5-4794-bc24-b26f95eaa38e","email":"qiwei@rxlab.app","email_verification_required":true}"#
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, verificationJSON.data(using: .utf8)!)
+        }
+
+        URLProtocol.registerClass(MockURLProtocol.self)
+        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
+
+        let storage = InMemoryTokenStorage()
+        let manager = OAuthManager(
+            configuration: makeConfig(),
+            tokenStorage: storage
+        )
+
+        let result = try await manager.signUp(
+            username: "qiwei@rxlab.app",
+            password: "create-password",
+            name: nil
+        )
+
+        #expect(result == .emailVerificationRequired(email: "qiwei@rxlab.app"))
+        #expect(manager.authState != .authenticated)
+        #expect(storage.getAccessToken() == nil)
+        #expect(manager.errorMessage == nil)
+        #expect(manager.infoMessage?.contains("qiwei@rxlab.app") == true)
+    }
+
+    @Test @MainActor func signUpRejectsBlankCredentials() async throws {
+        let manager = OAuthManager(
+            configuration: makeConfig(),
+            tokenStorage: InMemoryTokenStorage()
+        )
+
+        do {
+            try await manager.signUp(username: "", password: "", name: nil)
+            Issue.record("Expected invalid signup details error")
+        } catch OAuthError.invalidSignupDetails {
+            #expect(manager.errorMessage == OAuthError.invalidSignupDetails.localizedDescription)
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+}
+
+private final class LockedRequestBodies: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _values: [String] = []
+
+    var values: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _values
+    }
+
+    func append(_ value: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        _values.append(value)
+    }
+}
+
+private func requestBodyString(from request: URLRequest) -> String {
+    if let httpBody = request.httpBody {
+        return String(data: httpBody, encoding: .utf8) ?? ""
+    }
+
+    guard let stream = request.httpBodyStream else { return "" }
+    stream.open()
+    defer { stream.close() }
+
+    var data = Data()
+    let bufferSize = 1024
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+
+    while stream.hasBytesAvailable {
+        let read = stream.read(buffer, maxLength: bufferSize)
+        if read <= 0 { break }
+        data.append(buffer, count: read)
+    }
+
+    return String(data: data, encoding: .utf8) ?? ""
 }

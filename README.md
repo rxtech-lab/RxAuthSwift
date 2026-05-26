@@ -58,6 +58,37 @@ let config = RxAuthConfiguration(
 )
 ```
 
+For native macOS sign-in, `RxSignInView` renders username/password fields instead of launching a browser. Password sign-in posts an OAuth password-grant request directly to `nativePasswordTokenPath` or `tokenPath` when no native override is provided:
+
+```swift
+let config = RxAuthConfiguration(
+    issuer: "https://auth.example.com",
+    clientID: "your-client-id",
+    redirectURI: "yourapp://callback",
+    nativePasswordTokenPath: "/api/oauth/token",
+    nativeSignupPath: "/api/oauth/signup"
+)
+```
+
+The signup endpoint receives JSON with `client_id`, `username`, `password`, optional `name`, and `scope`, and should return the same token JSON as the OAuth token endpoint.
+
+Passkey sign-in and signup are enabled when the matching endpoint pairs are configured:
+
+```swift
+let config = RxAuthConfiguration(
+    issuer: "https://auth.example.com",
+    clientID: "your-client-id",
+    redirectURI: "yourapp://callback",
+    passkeyChallengePath: "/api/passkeys/authentication/options",
+    passkeyVerificationPath: "/api/passkeys/authentication/verify",
+    passkeyRegistrationChallengePath: "/api/passkeys/registration/options",
+    passkeyRegistrationVerificationPath: "/api/passkeys/registration/verify",
+    passkeyRelyingPartyIdentifier: "auth.example.com"
+)
+```
+
+The authentication challenge endpoint should return a base64url WebAuthn challenge, optional `requestID`, optional relying party identifier, and optional allowed credential IDs. The registration challenge endpoint should return a base64url challenge and user ID, plus optional `requestID`, username, and relying party identifier. Verification endpoints receive the platform passkey assertion or registration payload and return the same token JSON as the OAuth token endpoint.
+
 ### 2. Create OAuthManager
 
 ```swift

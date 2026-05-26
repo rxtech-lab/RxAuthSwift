@@ -18,7 +18,11 @@ struct ContentView: View {
             case .unknown:
                 ProgressView("Loading...")
                     .task {
-                        await manager.checkExistingAuth()
+                        async let auth: Void = manager.checkExistingAuth()
+                        async let schema: Void = {
+                            _ = await manager.loadUISchema()
+                        }()
+                        _ = await (auth, schema)
                     }
             case .unauthenticated:
                 RxSignInView(
@@ -34,6 +38,16 @@ struct ContentView: View {
                         print("Auth failed: \(error)")
                     }
                 )
+                #if os(macOS)
+                .onChange(of: manager.errorMessage) { _, newValue in
+                    if newValue != nil {
+                        Task {
+                            try? await Task.sleep(for: .seconds(5))
+                            manager.clearError()
+                        }
+                    }
+                }
+                #endif
             case .authenticated:
                 authenticatedView
             }

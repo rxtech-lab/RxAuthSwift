@@ -6,8 +6,8 @@ import PackageDescription
 let package = Package(
     name: "RxAuthSwift",
     platforms: [
-        .iOS(.v18),
-        .macOS(.v15),
+        .iOS(.v26),
+        .macOS(.v26),
     ],
     products: [
         .library(
@@ -20,13 +20,13 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0")
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
     ],
     targets: [
         .target(
             name: "RxAuthSwift",
             dependencies: [
-                .product(name: "Logging", package: "swift-log")
+                .product(name: "Logging", package: "swift-log"),
             ]
         ),
         .target(
