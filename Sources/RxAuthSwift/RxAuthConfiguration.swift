@@ -15,7 +15,12 @@ public struct RxAuthConfiguration: Sendable {
     public let passkeyVerificationPath: String?
     public let passkeyRegistrationChallengePath: String?
     public let passkeyRegistrationVerificationPath: String?
+    public let passkeyUpgradeChallengePath: String?
+    public let passkeyUpgradeVerificationPath: String?
+    public let passkeyAccountCreationOptionsPath: String?
+    public let passkeyAccountCreationVerifyPath: String?
     public let passkeyRelyingPartyIdentifier: String?
+    public let uiSchemaPath: String?
 
     public let keychainServiceName: String
 
@@ -33,7 +38,12 @@ public struct RxAuthConfiguration: Sendable {
         passkeyVerificationPath: String? = nil,
         passkeyRegistrationChallengePath: String? = nil,
         passkeyRegistrationVerificationPath: String? = nil,
+        passkeyUpgradeChallengePath: String? = nil,
+        passkeyUpgradeVerificationPath: String? = nil,
+        passkeyAccountCreationOptionsPath: String? = nil,
+        passkeyAccountCreationVerifyPath: String? = nil,
         passkeyRelyingPartyIdentifier: String? = nil,
+        uiSchemaPath: String? = "/api/auth/ui-schema",
         keychainServiceName: String = "com.rxlab.RxAuthSwift"
     ) {
         self.issuer = issuer
@@ -49,7 +59,12 @@ public struct RxAuthConfiguration: Sendable {
         self.passkeyVerificationPath = passkeyVerificationPath
         self.passkeyRegistrationChallengePath = passkeyRegistrationChallengePath
         self.passkeyRegistrationVerificationPath = passkeyRegistrationVerificationPath
+        self.passkeyUpgradeChallengePath = passkeyUpgradeChallengePath
+        self.passkeyUpgradeVerificationPath = passkeyUpgradeVerificationPath
+        self.passkeyAccountCreationOptionsPath = passkeyAccountCreationOptionsPath
+        self.passkeyAccountCreationVerifyPath = passkeyAccountCreationVerifyPath
         self.passkeyRelyingPartyIdentifier = passkeyRelyingPartyIdentifier
+        self.uiSchemaPath = uiSchemaPath
         self.keychainServiceName = keychainServiceName
     }
 
@@ -94,7 +109,34 @@ public struct RxAuthConfiguration: Sendable {
         return URL(string: issuer + passkeyRegistrationVerificationPath)
     }
 
+    public var passkeyUpgradeChallengeURL: URL? {
+        guard let passkeyUpgradeChallengePath else { return nil }
+        return URL(string: issuer + passkeyUpgradeChallengePath)
+    }
+
+    public var passkeyUpgradeVerificationURL: URL? {
+        guard let passkeyUpgradeVerificationPath else { return nil }
+        return URL(string: issuer + passkeyUpgradeVerificationPath)
+    }
+
+    public var passkeyAccountCreationOptionsURL: URL? {
+        guard let passkeyAccountCreationOptionsPath else { return nil }
+        return URL(string: issuer + passkeyAccountCreationOptionsPath)
+    }
+
+    public var passkeyAccountCreationVerifyURL: URL? {
+        guard let passkeyAccountCreationVerifyPath else { return nil }
+        return URL(string: issuer + passkeyAccountCreationVerifyPath)
+    }
+
     public var redirectScheme: String? {
         URL(string: redirectURI)?.scheme
+    }
+
+    public func uiSchemaURL(flow: AuthUISchema.Flow) -> URL? {
+        guard let uiSchemaPath else { return nil }
+        var components = URLComponents(string: issuer + uiSchemaPath + "/" + flow.rawValue)
+        components?.queryItems = [URLQueryItem(name: "client_id", value: clientID)]
+        return components?.url
     }
 }

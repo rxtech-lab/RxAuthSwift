@@ -13,6 +13,7 @@ public struct RxSignInAppearance: @unchecked Sendable {
     public var passkeySignupButtonTitle: LocalizedStringKey
     public var accentColor: Color
     public var secondaryColor: Color
+    public var showsAnimatedBackground: Bool
 
     public init(
         icon: SignInIcon = .systemImage("lock.shield.fill"),
@@ -26,7 +27,8 @@ public struct RxSignInAppearance: @unchecked Sendable {
         passkeyButtonTitle: LocalizedStringKey = "Continue with Passkey",
         passkeySignupButtonTitle: LocalizedStringKey = "Create Passkey Account",
         accentColor: Color = .blue,
-        secondaryColor: Color = .purple
+        secondaryColor: Color = .purple,
+        showsAnimatedBackground: Bool = true
     ) {
         self.icon = icon
         self.title = title
@@ -40,6 +42,7 @@ public struct RxSignInAppearance: @unchecked Sendable {
         self.passkeySignupButtonTitle = passkeySignupButtonTitle
         self.accentColor = accentColor
         self.secondaryColor = secondaryColor
+        self.showsAnimatedBackground = showsAnimatedBackground
     }
 
     public enum SignInIcon: Sendable {

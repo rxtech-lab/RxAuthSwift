@@ -22,6 +22,10 @@ struct testApp: App {
             passkeyVerificationPath: "/api/oauth/passkey/authenticate/verify",
             passkeyRegistrationChallengePath: "/api/oauth/passkey/register/options",
             passkeyRegistrationVerificationPath: "/api/oauth/passkey/register/verify",
+            passkeyUpgradeChallengePath: "/api/oauth/passkey/upgrade/options",
+            passkeyUpgradeVerificationPath: "/api/oauth/passkey/upgrade/verify",
+            passkeyAccountCreationOptionsPath: "/api/oauth/passkey/account-creation/options",
+            passkeyAccountCreationVerifyPath: "/api/oauth/passkey/account-creation/verify",
             passkeyRelyingPartyIdentifier: "rxlab.app"
         )
 

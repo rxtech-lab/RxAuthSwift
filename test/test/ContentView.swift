@@ -18,7 +18,11 @@ struct ContentView: View {
             case .unknown:
                 ProgressView("Loading...")
                     .task {
-                        await manager.checkExistingAuth()
+                        async let auth: Void = manager.checkExistingAuth()
+                        async let schema: Void = {
+                            _ = await manager.loadUISchema()
+                        }()
+                        _ = await (auth, schema)
                     }
             case .unauthenticated:
                 RxSignInView(

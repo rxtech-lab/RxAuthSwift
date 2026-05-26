@@ -4,12 +4,12 @@ import SwiftUI
 public struct RxSignInView<Header: View>: View {
     @Bindable private var manager: OAuthManager
     @State private var mode: NativeAuthMode = .signIn
-    @State private var username = ""
-    @State private var password = ""
-    @State private var name = ""
+    @State private var fieldValues: [String: String] = [:]
+    @State private var fieldErrors: [String: String] = [:]
     @State private var isAppearing = false
+    @State private var hasAttemptedSchemaLoad = false
     #if os(macOS)
-    @FocusState private var focusedField: CredentialField?
+    @FocusState private var focusedField: String?
     @Namespace private var glassNamespace
     #endif
     private let appearance: RxSignInAppearance
@@ -51,10 +51,12 @@ public struct RxSignInView<Header: View>: View {
     public var body: some View {
         ZStack {
             #if os(macOS)
-            AnimatedGradientBackground(
-                accentColor: appearance.accentColor,
-                secondaryColor: appearance.secondaryColor
-            )
+            if appearance.showsAnimatedBackground {
+                AnimatedGradientBackground(
+                    accentColor: appearance.accentColor,
+                    secondaryColor: appearance.secondaryColor
+                )
+            }
             macOSContent
             #else
             AnimatedGradientBackground(
@@ -115,6 +117,98 @@ public struct RxSignInView<Header: View>: View {
             }
         }
         .animation(.default, value: manager.infoMessage)
+        .sheet(isPresented: Binding(
+            get: { manager.pendingPasskeyOffer },
+            set: { newValue in
+                if !newValue && manager.pendingPasskeyOffer {
+                    manager.skipPasskeyUpgradeOffer()
+                    onAuthSuccess?()
+                }
+            }
+        )) {
+            passkeyOfferSheet
+        }
+    }
+
+    private var passkeyOfferSheet: some View {
+        VStack(spacing: 20) {
+            ZStack {
+                Circle()
+                    .fill(appearance.accentColor.opacity(0.18))
+                    .frame(width: 72, height: 72)
+                Image(systemName: "person.badge.key.fill")
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundStyle(appearance.accentColor)
+            }
+            .padding(.top, 24)
+
+            VStack(spacing: 8) {
+                Text("Add a passkey?")
+                    .font(.title3.weight(.semibold))
+                Text("Sign in next time with Touch ID or your iCloud Keychain — no password needed.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 24)
+
+            if let errorMessage = manager.errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            }
+
+            VStack(spacing: 10) {
+                Button {
+                    Task {
+                        do {
+                            try await manager.addPasskeyForCurrentUser()
+                            onAuthSuccess?()
+                        } catch {
+                            onAuthFailed?(error)
+                        }
+                    }
+                } label: {
+                    ZStack {
+                        Text("Add Passkey")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .opacity(manager.isAuthenticating ? 0 : 1)
+                        if manager.isAuthenticating {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .controlSize(.small)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(appearance.accentColor, in: .rect(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.defaultAction)
+                .disabled(manager.isAuthenticating)
+                .accessibilityIdentifier("add-passkey-button")
+
+                Button {
+                    manager.skipPasskeyUpgradeOffer()
+                    onAuthSuccess?()
+                } label: {
+                    Text("Maybe later")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 36)
+                }
+                .buttonStyle(.plain)
+                .disabled(manager.isAuthenticating)
+                .accessibilityIdentifier("skip-passkey-button")
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+        }
+        .frame(width: 340)
     }
 
     private func infoOverlay(message: String) -> some View {
@@ -257,9 +351,15 @@ public struct RxSignInView<Header: View>: View {
                 .glassEffectID("header-icon", in: glassNamespace)
 
             VStack(spacing: 6) {
-                Text(appearance.title)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.primary)
+                if let schemaTitle = currentSchema?.title, !schemaTitle.isEmpty {
+                    Text(schemaTitle)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.primary)
+                } else {
+                    Text(appearance.title)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
 
                 Text(appearance.subtitle)
                     .font(.callout)
@@ -295,56 +395,154 @@ public struct RxSignInView<Header: View>: View {
         }
     }
 
+    private var currentSchema: AuthUISchema? {
+        mode == .signIn ? manager.signInSchema : manager.signUpSchema
+    }
+
     private var nativeCredentialForm: some View {
         VStack(spacing: 18) {
             modeTogglePill
 
-            GlassEffectContainer(spacing: 12) {
-                VStack(spacing: 12) {
-                    if mode == .signUp {
-                        credentialField(
-                            systemImage: "person.text.rectangle",
-                            placeholder: appearance.namePlaceholder,
-                            text: $name,
-                            field: .name,
-                            accessibilityIdentifier: "name-field"
-                        )
-                        .glassEffectTransition(.matchedGeometry)
-                        .transition(.opacity.combined(with: .scale(scale: 0.95)).combined(with: .move(edge: .top)))
-                    }
-
-                    credentialField(
-                        systemImage: "person.crop.circle",
-                        placeholder: appearance.usernamePlaceholder,
-                        text: $username,
-                        field: .username,
-                        accessibilityIdentifier: "username-field"
-                    )
-
-                    secureCredentialField(
-                        systemImage: "lock.fill",
-                        placeholder: appearance.passwordPlaceholder,
-                        text: $password
-                    )
-                }
-            }
-            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: mode)
-
-            GlassEffectContainer(spacing: 16) {
-                VStack(spacing: 14) {
-                    primaryButton
-                        .keyboardShortcut(.defaultAction)
-
-                    if showsPasskeyButton {
-                        orDivider
-
-                        passkeyButton
-                            .glassEffectTransition(.materialize)
+            if let schema = currentSchema {
+                GlassEffectContainer(spacing: 12) {
+                    VStack(spacing: 12) {
+                        ForEach(schema.fields) { field in
+                            renderField(field)
+                        }
                     }
                 }
+                .animation(.spring(response: 0.4, dampingFraction: 0.85), value: mode)
+
+                GlassEffectContainer(spacing: 16) {
+                    VStack(spacing: 14) {
+                        let primaryMethods = schema.supportedMethods.filter { $0.primary }
+                        let secondaryMethods = schema.supportedMethods.filter { !$0.primary }
+                        let orderedMethods = primaryMethods + secondaryMethods
+
+                        ForEach(Array(orderedMethods.enumerated()), id: \.element.id) { index, method in
+                            if index == primaryMethods.count, !primaryMethods.isEmpty, !secondaryMethods.isEmpty {
+                                orDivider
+                            }
+                            methodButton(method, schema: schema)
+                                .glassEffectTransition(.materialize)
+                        }
+                    }
+                }
+                .padding(.top, 6)
+            } else if manager.isLoadingSchema || !hasAttemptedSchemaLoad {
+                ProgressView()
+                    .padding(.vertical, 40)
+            } else {
+                schemaErrorFallback
             }
-            .padding(.top, 6)
         }
+        .task(id: mode) {
+            if currentSchema == nil {
+                await manager.loadUISchema()
+            }
+            hasAttemptedSchemaLoad = true
+        }
+    }
+
+    private var schemaErrorFallback: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+            Text("Couldn't load sign-in form")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Retry") {
+                Task { await manager.loadUISchema() }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(.vertical, 32)
+    }
+
+    @ViewBuilder
+    private func renderField(_ field: AuthUISchema.Field) -> some View {
+        let binding = Binding<String>(
+            get: { fieldValues[field.key] ?? "" },
+            set: { newValue in
+                fieldValues[field.key] = newValue
+                fieldErrors[field.key] = nil
+            }
+        )
+        VStack(alignment: .leading, spacing: 4) {
+            if field.isPassword {
+                secureCredentialField(field: field, text: binding)
+            } else {
+                credentialField(field: field, text: binding)
+            }
+            if let error = fieldErrors[field.key] {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.leading, 14)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private func methodButton(_ method: AuthUISchema.SupportedMethod, schema: AuthUISchema) -> some View {
+        Button {
+            switch method.id {
+            case .password:
+                submitPrimary(schema: schema)
+            case .passkey:
+                submitPasskeyAction()
+            case .passkeyAccountCreation:
+                submitPasskeyAccountCreationAction()
+            }
+        } label: {
+            ZStack {
+                HStack(spacing: 8) {
+                    if method.id == .passkey || method.id == .passkeyAccountCreation {
+                        Image(systemName: "person.badge.key.fill")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(method.primary ? Color.white : appearance.accentColor)
+                    }
+                    Text(method.label)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(method.primary ? Color.white : .primary)
+                }
+                .opacity(manager.isAuthenticating ? 0 : 1)
+
+                if manager.isAuthenticating, isCurrentSubmitMethod(method) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .glassEffect(
+                method.primary
+                    ? .regular.tint(appearance.accentColor).interactive()
+                    : .regular.interactive(),
+                in: .rect(cornerRadius: 12)
+            )
+        }
+        .buttonStyle(.plain)
+        .glassEffectID("method-\(method.id.rawValue)", in: glassNamespace)
+        .disabled(manager.isAuthenticating)
+        .opacity(manager.isAuthenticating ? 0.7 : 1)
+        .keyboardShortcut(method.primary ? .defaultAction : nil)
+        .accessibilityIdentifier(accessibilityIdentifier(for: method))
+    }
+
+    private func accessibilityIdentifier(for method: AuthUISchema.SupportedMethod) -> String {
+        switch method.id {
+        case .password: return "sign-in-button"
+        case .passkey: return "passkey-sign-in-button"
+        case .passkeyAccountCreation: return "passkey-account-creation-button"
+        }
+    }
+
+    private func isCurrentSubmitMethod(_ method: AuthUISchema.SupportedMethod) -> Bool {
+        // Best-effort indicator; primary method shows progress when authenticating.
+        method.primary
     }
 
     private var modeTogglePill: some View {
@@ -383,32 +581,6 @@ public struct RxSignInView<Header: View>: View {
         .buttonStyle(.plain)
     }
 
-    private var primaryButton: some View {
-        Button {
-            submitPrimary()
-        } label: {
-            ZStack {
-                Text(mode == .signIn ? appearance.signInButtonTitle : appearance.signUpButtonTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .opacity(manager.isAuthenticating ? 0 : 1)
-
-                if manager.isAuthenticating {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .controlSize(.small)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 44)
-            .glassEffect(.regular.tint(appearance.accentColor).interactive(), in: .rect(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .glassEffectID("primary-button", in: glassNamespace)
-        .disabled(manager.isAuthenticating)
-        .opacity(manager.isAuthenticating ? 0.7 : 1)
-        .accessibilityIdentifier("sign-in-button")
-    }
-
     private var orDivider: some View {
         HStack(spacing: 10) {
             Rectangle()
@@ -424,50 +596,26 @@ public struct RxSignInView<Header: View>: View {
         }
     }
 
-    private var passkeyButton: some View {
-        Button {
-            submitPasskeyAction()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "person.badge.key.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(appearance.accentColor)
-                Text(mode == .signIn ? appearance.passkeyButtonTitle : appearance.passkeySignupButtonTitle)
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 44)
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
-        .glassEffectID("passkey-button", in: glassNamespace)
-        .disabled(manager.isAuthenticating)
-        .accessibilityIdentifier("passkey-sign-in-button")
-    }
-
     private func credentialField(
-        systemImage: String,
-        placeholder: LocalizedStringKey,
-        text: Binding<String>,
-        field: CredentialField,
-        accessibilityIdentifier: String
+        field: AuthUISchema.Field,
+        text: Binding<String>
     ) -> some View {
-        let isFocused = focusedField == field
+        let isFocused = focusedField == field.key
         return HStack(spacing: 12) {
-            Image(systemName: systemImage)
+            Image(systemName: iconName(for: field))
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(isFocused ? appearance.accentColor : Color.secondary)
                 .frame(width: 20)
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
                 .scaleEffect(isFocused ? 1.1 : 1.0)
 
-            TextField(placeholder, text: text)
+            TextField(field.placeholder ?? field.label, text: text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
-                .focused($focusedField, equals: field)
+                .focused($focusedField, equals: field.key)
                 .submitLabel(.next)
-                .onSubmit(advanceFocus)
-                .accessibilityIdentifier(accessibilityIdentifier)
+                .onSubmit { advanceFocus(from: field.key) }
+                .accessibilityIdentifier("\(field.key)-field")
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
@@ -475,30 +623,31 @@ public struct RxSignInView<Header: View>: View {
             isFocused ? .regular.tint(appearance.accentColor.opacity(0.2)).interactive() : .regular.interactive(),
             in: .rect(cornerRadius: 12)
         )
-        .glassEffectID("field-\(field)", in: glassNamespace)
+        .glassEffectID("field-\(field.key)", in: glassNamespace)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isFocused)
     }
 
     private func secureCredentialField(
-        systemImage: String,
-        placeholder: LocalizedStringKey,
+        field: AuthUISchema.Field,
         text: Binding<String>
     ) -> some View {
-        let isFocused = focusedField == .password
+        let isFocused = focusedField == field.key
         return HStack(spacing: 12) {
-            Image(systemName: systemImage)
+            Image(systemName: iconName(for: field))
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(isFocused ? appearance.accentColor : Color.secondary)
                 .frame(width: 20)
                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
                 .scaleEffect(isFocused ? 1.1 : 1.0)
 
-            SecureField(placeholder, text: text)
+            SecureField(field.placeholder ?? field.label, text: text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
-                .focused($focusedField, equals: .password)
-                .onSubmit(submitPrimary)
-                .accessibilityIdentifier("password-field")
+                .focused($focusedField, equals: field.key)
+                .onSubmit {
+                    if let schema = currentSchema { submitPrimary(schema: schema) }
+                }
+                .accessibilityIdentifier("\(field.key)-field")
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
@@ -506,45 +655,82 @@ public struct RxSignInView<Header: View>: View {
             isFocused ? .regular.tint(appearance.accentColor.opacity(0.2)).interactive() : .regular.interactive(),
             in: .rect(cornerRadius: 12)
         )
-        .glassEffectID("field-password", in: glassNamespace)
+        .glassEffectID("field-\(field.key)", in: glassNamespace)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isFocused)
     }
 
-    private func advanceFocus() {
-        switch focusedField {
-        case .name:
-            focusedField = .username
-        case .username:
-            focusedField = .password
-        case .password, .none:
-            submitPrimary()
+    private func iconName(for field: AuthUISchema.Field) -> String {
+        switch field.type {
+        case .email: return "envelope"
+        case .password: return "lock.fill"
+        case .name: return "person.text.rectangle"
+        case .text: return "person.crop.circle"
         }
     }
 
-    private var showsPasskeyButton: Bool {
-        switch mode {
-        case .signIn:
-            return manager.supportsPasskeyAuthentication
-        case .signUp:
-            return manager.supportsPasskeyRegistration
+    private func advanceFocus(from key: String) {
+        guard let schema = currentSchema,
+              let idx = schema.fields.firstIndex(where: { $0.key == key })
+        else { return }
+        let next = idx + 1
+        if next < schema.fields.count {
+            focusedField = schema.fields[next].key
+        } else {
+            submitPrimary(schema: schema)
         }
     }
 
-    private func submitPrimary() {
+    private func value(forKey key: String) -> String {
+        fieldValues[key] ?? ""
+    }
+
+    private func primaryIdentifier(_ schema: AuthUISchema) -> String {
+        // Server-driven username/email is whichever non-password field comes first.
+        for field in schema.fields where !field.isPassword && field.type != .name {
+            return value(forKey: field.key)
+        }
+        return value(forKey: "email").isEmpty ? value(forKey: "username") : value(forKey: "email")
+    }
+
+    private func validate(_ schema: AuthUISchema, requirePassword: Bool) -> Bool {
+        var errors: [String: String] = [:]
+        for field in schema.fields {
+            if !requirePassword && field.isPassword { continue }
+            if let error = field.validate(value(forKey: field.key)) {
+                errors[field.key] = error
+            }
+        }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            fieldErrors = errors
+        }
+        return errors.isEmpty
+    }
+
+    private func submitPrimary(schema: AuthUISchema) {
+        guard validate(schema, requirePassword: true) else { return }
+        let identifier = primaryIdentifier(schema)
+        let password = value(forKey: "password")
+        let name = value(forKey: "name")
+
         Task {
             do {
                 switch mode {
                 case .signIn:
-                    try await manager.authenticate(username: username, password: password)
+                    try await manager.authenticate(username: identifier, password: password)
                     onAuthSuccess?()
                 case .signUp:
-                    let result = try await manager.signUp(username: username, password: password, name: name)
+                    let result = try await manager.signUp(username: identifier, password: password, name: name)
                     switch result {
                     case .authenticated:
-                        onAuthSuccess?()
+                        if !manager.pendingPasskeyOffer {
+                            onAuthSuccess?()
+                        }
+                        // Otherwise the sheet bound to `manager.pendingPasskeyOffer`
+                        // takes over; it will call `onAuthSuccess` once the user
+                        // either adds a passkey or skips.
                     case .emailVerificationRequired:
-                        password = ""
-                        name = ""
+                        fieldValues["password"] = ""
+                        fieldValues["name"] = ""
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                             mode = .signIn
                         }
@@ -557,14 +743,34 @@ public struct RxSignInView<Header: View>: View {
     }
 
     private func submitPasskeyAction() {
+        guard let schema = currentSchema else { return }
+        guard validate(schema, requirePassword: false) else { return }
+        let identifier = primaryIdentifier(schema)
+        let name = value(forKey: "name")
+
         Task {
             do {
                 switch mode {
                 case .signIn:
-                    try await manager.authenticateWithPasskey(username: username)
+                    try await manager.authenticateWithPasskey(username: identifier)
                 case .signUp:
-                    try await manager.signUpWithPasskey(username: username, name: name)
+                    try await manager.signUpWithPasskey(username: identifier, name: name)
                 }
+                onAuthSuccess?()
+            } catch {
+                onAuthFailed?(error)
+            }
+        }
+    }
+
+    /// System-sheet account creation (iOS 26 / macOS 26): no fields, no
+    /// validation — the OS sheet collects email/name from iCloud. Only
+    /// reachable when the server emits the `passkey_account_creation`
+    /// method in the signup schema.
+    private func submitPasskeyAccountCreationAction() {
+        Task {
+            do {
+                try await manager.createAccountWithPasskey()
                 onAuthSuccess?()
             } catch {
                 onAuthFailed?(error)
@@ -578,14 +784,6 @@ private enum NativeAuthMode: Hashable {
     case signIn
     case signUp
 }
-
-#if os(macOS)
-private enum CredentialField: Hashable {
-    case name
-    case username
-    case password
-}
-#endif
 
 // MARK: - Previews
 
@@ -622,6 +820,66 @@ private enum CredentialField: Hashable {
     )
     .preferredColorScheme(.dark)
 }
+
+#Preview("No Animated Background") {
+    RxSignInView(
+        manager: OAuthManager(
+            configuration: RxAuthConfiguration(
+                issuer: "https://auth.example.com",
+                clientID: "preview-client",
+                redirectURI: "myapp://callback"
+            )
+        ),
+        appearance: RxSignInAppearance(
+            accentColor: .blue,
+            secondaryColor: .purple,
+            showsAnimatedBackground: false
+        )
+    )
+    .preferredColorScheme(.dark)
+}
+
+#if DEBUG
+private struct GroupedMethodsPreview: View {
+    @State private var manager: OAuthManager = {
+        let manager = OAuthManager(
+            configuration: RxAuthConfiguration(
+                issuer: "https://auth.example.com",
+                clientID: "preview-client",
+                redirectURI: "myapp://callback"
+            )
+        )
+        let json = #"""
+        {
+          "flow": "signin",
+          "title": "Welcome back",
+          "submitLabel": "Sign In",
+          "fields": [
+            { "key": "email", "label": "Email", "placeholder": "you@example.com", "type": "email", "isPassword": false, "required": true, "autocomplete": "email" },
+            { "key": "password", "label": "Password", "placeholder": "••••••••", "type": "password", "isPassword": true, "required": true, "autocomplete": "current-password" }
+          ],
+          "supportedMethods": [
+            { "id": "password", "label": "Sign In", "primary": true },
+            { "id": "passkey", "label": "Sign in with Passkey", "primary": false },
+            { "id": "passkey_account_creation", "label": "Use iCloud Keychain", "primary": false }
+          ]
+        }
+        """#
+        let signIn = try! JSONDecoder().decode(AuthUISchema.self, from: Data(json.utf8))
+        manager._previewInject(signIn: signIn, signUp: nil)
+        return manager
+    }()
+
+    var body: some View {
+        RxSignInView(manager: manager)
+    }
+}
+
+#Preview("Grouped Methods (1 primary + 2 secondary)") {
+    GroupedMethodsPreview()
+        .preferredColorScheme(.dark)
+}
+#endif
 
 #Preview("Custom Header") {
     RxSignInView(
