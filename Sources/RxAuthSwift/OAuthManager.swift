@@ -342,6 +342,7 @@ public final class OAuthManager: Sendable {
         challengeRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         challengeRequest.httpBody = try JSONEncoder().encode(PasskeyChallengeRequest(
             clientID: configuration.clientID,
+            redirectURI: configuration.redirectURI,
             username: username.nilIfBlank
         ))
 
@@ -413,6 +414,7 @@ public final class OAuthManager: Sendable {
         challengeRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         challengeRequest.httpBody = try JSONEncoder().encode(PasskeyRegistrationChallengeRequest(
             clientID: configuration.clientID,
+            redirectURI: configuration.redirectURI,
             username: trimmedUsername,
             name: name.nilIfBlank
         ))
@@ -616,10 +618,12 @@ private struct TokenResponse: Decodable {
 
 private struct PasskeyChallengeRequest: Encodable {
     let clientID: String
+    let redirectURI: String
     let username: String?
 
     enum CodingKeys: String, CodingKey {
         case clientID = "client_id"
+        case redirectURI = "redirect_uri"
         case username
     }
 }
@@ -689,11 +693,13 @@ private struct PasskeyChallengeResponse: Decodable {
 
 private struct PasskeyRegistrationChallengeRequest: Encodable {
     let clientID: String
+    let redirectURI: String
     let username: String
     let name: String?
 
     enum CodingKeys: String, CodingKey {
         case clientID = "client_id"
+        case redirectURI = "redirect_uri"
         case username
         case name
     }
