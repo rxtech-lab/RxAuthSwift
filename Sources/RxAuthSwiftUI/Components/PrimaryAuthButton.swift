@@ -1,18 +1,21 @@
 import SwiftUI
 
 public struct PrimaryAuthButton: View {
-    let title: String
+    let title: LocalizedStringKey
+    let loadingTitle: LocalizedStringKey
     let isLoading: Bool
     let accentColor: Color
     let action: () -> Void
 
     public init(
-        title: String = "Sign In",
+        title: LocalizedStringKey = "Sign In",
+        loadingTitle: LocalizedStringKey = "Signing In...",
         isLoading: Bool = false,
         accentColor: Color = .blue,
         action: @escaping () -> Void
     ) {
         self.title = title
+        self.loadingTitle = loadingTitle
         self.isLoading = isLoading
         self.accentColor = accentColor
         self.action = action
@@ -34,7 +37,7 @@ public struct PrimaryAuthButton: View {
                 } else {
                     Image(systemName: "arrow.right.circle.fill")
                 }
-                Text(isLoading ? "Signing In..." : title)
+                Text(isLoading ? loadingTitle : title)
                     .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity)

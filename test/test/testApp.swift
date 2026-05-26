@@ -16,7 +16,12 @@ struct testApp: App {
         let configuration = RxAuthConfiguration(
             issuer: "https://auth.rxlab.app",
             clientID: "client_8605760939b8494c8bfe29c77ae7ee7f",
-            redirectURI: "rxauth://callback"
+            redirectURI: "rxauth://callback",
+            passkeyChallengePath: "/api/auth/passkey/authenticate/options",
+            passkeyVerificationPath: "/api/auth/passkey/authenticate/verify",
+            passkeyRegistrationChallengePath: "/api/auth/passkey/register/options",
+            passkeyRegistrationVerificationPath: "/api/auth/passkey/register/verify",
+            passkeyRelyingPartyIdentifier: "rxlab.app"
         )
 
         let resetAuth = ProcessInfo.processInfo.arguments.contains("--reset-auth")

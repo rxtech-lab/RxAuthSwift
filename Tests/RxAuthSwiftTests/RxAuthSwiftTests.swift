@@ -88,6 +88,29 @@ struct RxAuthConfigurationTests {
         #expect(config.userInfoPath == "/oauth/me")
     }
 
+    @Test func nativeCredentialEndpoints() {
+        let config = RxAuthConfiguration(
+            issuer: "https://auth.example.com",
+            clientID: "client-123",
+            redirectURI: "myapp://callback",
+            nativePasswordTokenPath: "/api/native/token",
+            nativeSignupPath: "/api/native/signup",
+            passkeyChallengePath: "/api/passkeys/options",
+            passkeyVerificationPath: "/api/passkeys/verify",
+            passkeyRegistrationChallengePath: "/api/passkeys/register/options",
+            passkeyRegistrationVerificationPath: "/api/passkeys/register/verify",
+            passkeyRelyingPartyIdentifier: "auth.example.com"
+        )
+
+        #expect(config.nativePasswordTokenURL?.absoluteString == "https://auth.example.com/api/native/token")
+        #expect(config.nativeSignupURL?.absoluteString == "https://auth.example.com/api/native/signup")
+        #expect(config.passkeyChallengeURL?.absoluteString == "https://auth.example.com/api/passkeys/options")
+        #expect(config.passkeyVerificationURL?.absoluteString == "https://auth.example.com/api/passkeys/verify")
+        #expect(config.passkeyRegistrationChallengeURL?.absoluteString == "https://auth.example.com/api/passkeys/register/options")
+        #expect(config.passkeyRegistrationVerificationURL?.absoluteString == "https://auth.example.com/api/passkeys/register/verify")
+        #expect(config.passkeyRelyingPartyIdentifier == "auth.example.com")
+    }
+
     @Test func urlConstruction() {
         let config = RxAuthConfiguration(
             issuer: "https://auth.example.com",

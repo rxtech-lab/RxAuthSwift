@@ -11,6 +11,9 @@ public enum OAuthError: LocalizedError, Sendable {
     case noRefreshToken
     case invalidCallbackURL
     case cancelled
+    case invalidCredentials
+    case invalidSignupDetails
+    case passkeyUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -34,6 +37,12 @@ public enum OAuthError: LocalizedError, Sendable {
             return "Invalid callback URL received"
         case .cancelled:
             return "Authentication was cancelled"
+        case .invalidCredentials:
+            return "Enter a username and password"
+        case .invalidSignupDetails:
+            return "Enter a username and password to create an account"
+        case .passkeyUnavailable:
+            return "Passkey sign in is not configured for this app"
         }
     }
 }
