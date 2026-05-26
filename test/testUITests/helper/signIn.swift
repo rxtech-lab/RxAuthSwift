@@ -66,11 +66,11 @@ extension XCUIApplication {
             emailField.typeText("\n") // Press Enter to move to next field
         #elseif os(macOS)
 
-            let emailField = textFields["you@example.com"].firstMatch
+            let emailField = textFields["email-field"].firstMatch
             let emailFieldExists = emailField.waitForExistence(timeout: 30)
             XCTAssertTrue(emailFieldExists, "Failed to sign in and reach dashboard")
 
-            let passwordField = self/*@START_MENU_TOKEN@*/ .secureTextFields["Enter your password"].firstMatch/*[[".groups",".secureTextFields[\"Password\"].firstMatch",".secureTextFields[\"Enter your password\"].firstMatch",".secureTextFields",".containing(.group, identifier: nil).firstMatch",".firstMatch"],[[[-1,2],[-1,1],[-1,3,2],[-1,0,1]],[[-1,2],[-1,1]],[[-1,5],[-1,4]]],[0]]@END_MENU_TOKEN@*/
+            let passwordField = secureTextFields["password-field"].firstMatch
 
             emailField.click()
             emailField.typeText(testEmail)
