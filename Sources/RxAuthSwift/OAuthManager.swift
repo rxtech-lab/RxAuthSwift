@@ -8,11 +8,17 @@ public final class OAuthManager: Sendable {
     public private(set) var authState: AuthenticationState = .unknown
     public private(set) var currentUser: User?
     public private(set) var errorMessage: String?
+    public private(set) var infoMessage: String?
     public private(set) var isAuthenticating = false
 
     /// Clears the current error message
     public func clearError() {
         errorMessage = nil
+    }
+
+    /// Clears the current informational message
+    public func clearInfo() {
+        infoMessage = nil
     }
     public var supportsPasskeyAuthentication: Bool {
         configuration.passkeyChallengeURL != nil && configuration.passkeyVerificationURL != nil
@@ -130,14 +136,23 @@ public final class OAuthManager: Sendable {
         }
     }
 
-    public func signUp(username: String, password: String, name: String? = nil) async throws {
+    @discardableResult
+    public func signUp(username: String, password: String, name: String? = nil) async throws -> SignupResult {
         isAuthenticating = true
         errorMessage = nil
+        infoMessage = nil
         defer { isAuthenticating = false }
 
         do {
-            try await exchangeSignupForTokens(username: username, password: password, name: name)
-            logger.info("Native username/password signup completed successfully")
+            let result = try await exchangeSignupForTokens(username: username, password: password, name: name)
+            switch result {
+            case .authenticated:
+                logger.info("Native username/password signup completed successfully")
+            case .emailVerificationRequired(let email):
+                infoMessage = "Check \(email) for a verification link, then sign in."
+                logger.info("Signup created an unverified account; awaiting email verification: \(email)")
+            }
+            return result
         } catch {
             errorMessage = error.localizedDescription
             throw error
@@ -300,7 +315,7 @@ public final class OAuthManager: Sendable {
         startTokenRefreshTimer()
     }
 
-    private func exchangeSignupForTokens(username: String, password: String, name: String?) async throws {
+    private func exchangeSignupForTokens(username: String, password: String, name: String?) async throws -> SignupResult {
         let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedUsername.isEmpty, !password.isEmpty else {
             throw OAuthError.invalidSignupDetails
@@ -321,12 +336,16 @@ public final class OAuthManager: Sendable {
             scope: configuration.scopes.joined(separator: " ")
         ))
 
-        let tokenResponse = try await sendTokenRequest(request)
-        try saveTokens(tokenResponse)
-        try await fetchUserInfo()
-
-        authState = .authenticated
-        startTokenRefreshTimer()
+        switch try await sendSignupRequest(request) {
+        case .tokens(let tokenResponse):
+            try saveTokens(tokenResponse)
+            try await fetchUserInfo()
+            authState = .authenticated
+            startTokenRefreshTimer()
+            return .authenticated
+        case .verificationRequired(let email):
+            return .emailVerificationRequired(email: email ?? trimmedUsername)
+        }
     }
 
     private func exchangePasskeyAssertionForTokens(username: String?) async throws {
@@ -503,6 +522,36 @@ public final class OAuthManager: Sendable {
         }
     }
 
+    private func sendSignupRequest(_ request: URLRequest) async throws -> SignupServerResponse {
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OAuthError.tokenExchangeFailed("Invalid response")
+        }
+
+        let bodyString = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let url = request.url?.absoluteString ?? "<unknown URL>"
+            logger.error("Signup request failed: POST \(url) -> HTTP \(httpResponse.statusCode); body: \(bodyString)")
+            throw OAuthError.tokenExchangeFailed("HTTP \(httpResponse.statusCode): \(bodyString)")
+        }
+
+        // Signup may return either an OAuth token payload (E2E mode) or a
+        // verification-required payload (default mode). Try the verification
+        // shape first because it omits `access_token`, so a TokenResponse
+        // decode would succeed for token payloads but fail for verification
+        // ones.
+        if let pending = try? JSONDecoder().decode(SignupPendingVerificationResponse.self, from: data),
+           pending.emailVerificationRequired == true
+        {
+            return .verificationRequired(email: pending.email)
+        }
+
+        let tokenResponse = try JSONDecoder().decode(TokenResponse.self, from: data)
+        return .tokens(tokenResponse)
+    }
+
     private func sendTokenRequest(_ request: URLRequest) async throws -> TokenResponse {
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -599,6 +648,34 @@ private struct OAuthErrorResponse: Decodable {
             return error.replacingOccurrences(of: "_", with: " ").capitalized
         }
         return "Authentication failed"
+    }
+}
+
+// MARK: - Signup Result
+
+public enum SignupResult: Sendable, Equatable {
+    /// Server returned tokens and the user is now signed in.
+    case authenticated
+    /// Account was created but the server requires email verification before
+    /// tokens will be issued. `email` is the address the verification link was
+    /// sent to (mirrors what the user typed when the server did not echo one).
+    case emailVerificationRequired(email: String)
+}
+
+private enum SignupServerResponse {
+    case tokens(TokenResponse)
+    case verificationRequired(email: String?)
+}
+
+private struct SignupPendingVerificationResponse: Decodable {
+    let userID: String?
+    let email: String?
+    let emailVerificationRequired: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case email
+        case emailVerificationRequired = "email_verification_required"
     }
 }
 

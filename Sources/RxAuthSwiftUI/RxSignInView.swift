@@ -109,8 +109,48 @@ public struct RxSignInView<Header: View>: View {
             if let errorMessage = manager.errorMessage {
                 errorOverlay(message: errorMessage)
                     .transition(.move(edge: .top).combined(with: .opacity))
+            } else if let infoMessage = manager.infoMessage {
+                infoOverlay(message: infoMessage)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .animation(.default, value: manager.infoMessage)
+    }
+
+    private func infoOverlay(message: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "envelope.badge.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(appearance.accentColor)
+
+            Text(message)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+
+            Spacer()
+
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    manager.clearInfo()
+                }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss message")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: 400)
+        .glassEffect(.regular.tint(appearance.accentColor.opacity(0.3)), in: .rect(cornerRadius: 12))
+        .glassEffectID("info", in: glassNamespace)
+        .padding(.top, 16)
+        .padding(.horizontal, 32)
     }
 
     private func errorOverlay(message: String) -> some View {
@@ -496,10 +536,20 @@ public struct RxSignInView<Header: View>: View {
                 switch mode {
                 case .signIn:
                     try await manager.authenticate(username: username, password: password)
+                    onAuthSuccess?()
                 case .signUp:
-                    try await manager.signUp(username: username, password: password, name: name)
+                    let result = try await manager.signUp(username: username, password: password, name: name)
+                    switch result {
+                    case .authenticated:
+                        onAuthSuccess?()
+                    case .emailVerificationRequired:
+                        password = ""
+                        name = ""
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            mode = .signIn
+                        }
+                    }
                 }
-                onAuthSuccess?()
             } catch {
                 onAuthFailed?(error)
             }

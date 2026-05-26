@@ -436,6 +436,41 @@ struct OAuthManagerTokenCleanupTests {
         #expect(body.contains(#""name":"Signup User""#))
     }
 
+    @Test @MainActor func signUpReturnsVerificationRequiredOn201() async throws {
+        MockURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/oauth/signup")
+            let verificationJSON = #"{"user_id":"40ff1a29-39e5-4794-bc24-b26f95eaa38e","email":"qiwei@rxlab.app","email_verification_required":true}"#
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, verificationJSON.data(using: .utf8)!)
+        }
+
+        URLProtocol.registerClass(MockURLProtocol.self)
+        defer { URLProtocol.unregisterClass(MockURLProtocol.self) }
+
+        let storage = InMemoryTokenStorage()
+        let manager = OAuthManager(
+            configuration: makeConfig(),
+            tokenStorage: storage
+        )
+
+        let result = try await manager.signUp(
+            username: "qiwei@rxlab.app",
+            password: "create-password",
+            name: nil
+        )
+
+        #expect(result == .emailVerificationRequired(email: "qiwei@rxlab.app"))
+        #expect(manager.authState != .authenticated)
+        #expect(storage.getAccessToken() == nil)
+        #expect(manager.errorMessage == nil)
+        #expect(manager.infoMessage?.contains("qiwei@rxlab.app") == true)
+    }
+
     @Test @MainActor func signUpRejectsBlankCredentials() async throws {
         let manager = OAuthManager(
             configuration: makeConfig(),
