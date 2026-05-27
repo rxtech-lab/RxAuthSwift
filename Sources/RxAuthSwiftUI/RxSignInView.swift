@@ -744,7 +744,13 @@ public struct RxSignInView<Header: View>: View {
 
     private func submitPasskeyAction() {
         guard let schema = currentSchema else { return }
-        guard validate(schema, requirePassword: false) else { return }
+
+        // For passkey sign-in, skip validation - the passkey identifies the user.
+        // For sign-up, we still need to validate user info fields.
+        if mode == .signUp {
+            guard validate(schema, requirePassword: false) else { return }
+        }
+
         let identifier = primaryIdentifier(schema)
         let name = value(forKey: "name")
 
