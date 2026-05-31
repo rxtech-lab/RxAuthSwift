@@ -256,7 +256,7 @@ public struct RxSignInView<Header: View>: View {
             Text(message)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
-                .lineLimit(2)
+                .lineLimit(4)
 
             Spacer()
 
