@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// Controls how `RxSignInView` collects credentials.
+///
+/// On iOS this is honored directly; `.web` (the default) launches the system
+/// web authentication session, while `.native` renders the in-app credential
+/// form. On macOS the view always uses the native form regardless of this
+/// value, since that is its only supported presentation.
+public enum RxSignInStyle: Sendable {
+    /// Presents the system web authentication session (`ASWebAuthenticationSession`).
+    case web
+    /// Presents an in-app native credential form (email / password, plus
+    /// passkeys on platforms where they are available).
+    case native
+}
+
 public struct RxSignInAppearance: @unchecked Sendable {
     public var icon: SignInIcon
     public var title: LocalizedStringKey
