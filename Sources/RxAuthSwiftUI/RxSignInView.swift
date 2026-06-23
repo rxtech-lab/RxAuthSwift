@@ -413,22 +413,6 @@ public struct RxSignInView<Header: View>: View {
         mode == .signIn ? manager.signInSchema : manager.signUpSchema
     }
 
-    /// Methods to surface in the native form for the current platform.
-    ///
-    /// iOS passkey ceremonies are not yet implemented in `OAuthManager` (they
-    /// throw `.passkeyUnavailable`), so on iOS we only surface password-based
-    /// methods to avoid presenting buttons that always fail. If filtering would
-    /// leave nothing, we fall back to the full server-provided list. Remove this
-    /// filter once an iOS passkey authenticator lands.
-    private func displayMethods(_ schema: AuthUISchema) -> [AuthUISchema.SupportedMethod] {
-        #if os(iOS)
-        let filtered = schema.supportedMethods.filter { $0.id == .password }
-        return filtered.isEmpty ? schema.supportedMethods : filtered
-        #else
-        return schema.supportedMethods
-        #endif
-    }
-
     private var nativeCredentialForm: some View {
         VStack(spacing: 18) {
             modeTogglePill
@@ -445,7 +429,7 @@ public struct RxSignInView<Header: View>: View {
 
                 GlassEffectContainer(spacing: 16) {
                     VStack(spacing: 14) {
-                        let methods = displayMethods(schema)
+                        let methods = schema.supportedMethods
                         let primaryMethods = methods.filter { $0.primary }
                         let secondaryMethods = methods.filter { !$0.primary }
                         let orderedMethods = primaryMethods + secondaryMethods

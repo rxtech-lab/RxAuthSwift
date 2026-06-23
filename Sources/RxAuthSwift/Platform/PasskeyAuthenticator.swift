@@ -1,12 +1,32 @@
-#if canImport(AuthenticationServices) && os(macOS)
-import AppKit
+#if canImport(AuthenticationServices) && (os(macOS) || os(iOS))
 import AuthenticationServices
 import Foundation
 
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
+
+/// Resolves the platform presentation anchor for an `ASAuthorizationController`.
+/// macOS uses the key/main window; iOS uses the foreground window scene's window.
 @MainActor
-final class MacOSPasskeyAuthenticator: NSObject {
+private func resolvePresentationAnchor() -> ASPresentationAnchor {
+    #if os(macOS)
+    return NSApplication.shared.keyWindow
+        ?? NSApplication.shared.mainWindow
+        ?? ASPresentationAnchor()
+    #else
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    return scene?.keyWindow ?? scene?.windows.first ?? ASPresentationAnchor()
+    #endif
+}
+
+@MainActor
+final class PlatformPasskeyAuthenticator: NSObject {
     private var continuation: CheckedContinuation<PasskeyAssertion, Error>?
-    private var retainedSelf: MacOSPasskeyAuthenticator?
+    private var retainedSelf: PlatformPasskeyAuthenticator?
 
     func authenticate(
         relyingPartyIdentifier: String,
@@ -46,7 +66,7 @@ final class MacOSPasskeyAuthenticator: NSObject {
     }
 }
 
-extension MacOSPasskeyAuthenticator: ASAuthorizationControllerDelegate {
+extension PlatformPasskeyAuthenticator: ASAuthorizationControllerDelegate {
     func authorizationController(
         controller: ASAuthorizationController,
         didCompleteWithAuthorization authorization: ASAuthorization
@@ -79,11 +99,9 @@ extension MacOSPasskeyAuthenticator: ASAuthorizationControllerDelegate {
     }
 }
 
-extension MacOSPasskeyAuthenticator: ASAuthorizationControllerPresentationContextProviding {
+extension PlatformPasskeyAuthenticator: ASAuthorizationControllerPresentationContextProviding {
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        NSApplication.shared.keyWindow
-            ?? NSApplication.shared.mainWindow
-            ?? ASPresentationAnchor()
+        resolvePresentationAnchor()
     }
 }
 
@@ -96,9 +114,9 @@ struct PasskeyAssertion {
 }
 
 @MainActor
-final class MacOSPasskeyRegistrationAuthenticator: NSObject {
+final class PlatformPasskeyRegistrationAuthenticator: NSObject {
     private var continuation: CheckedContinuation<PasskeyRegistration, Error>?
-    private var retainedSelf: MacOSPasskeyRegistrationAuthenticator?
+    private var retainedSelf: PlatformPasskeyRegistrationAuthenticator?
 
     func register(
         relyingPartyIdentifier: String,
@@ -140,7 +158,7 @@ final class MacOSPasskeyRegistrationAuthenticator: NSObject {
     }
 }
 
-extension MacOSPasskeyRegistrationAuthenticator: ASAuthorizationControllerDelegate {
+extension PlatformPasskeyRegistrationAuthenticator: ASAuthorizationControllerDelegate {
     func authorizationController(
         controller: ASAuthorizationController,
         didCompleteWithAuthorization authorization: ASAuthorization
@@ -171,11 +189,9 @@ extension MacOSPasskeyRegistrationAuthenticator: ASAuthorizationControllerDelega
     }
 }
 
-extension MacOSPasskeyRegistrationAuthenticator: ASAuthorizationControllerPresentationContextProviding {
+extension PlatformPasskeyRegistrationAuthenticator: ASAuthorizationControllerPresentationContextProviding {
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        NSApplication.shared.keyWindow
-            ?? NSApplication.shared.mainWindow
-            ?? ASPresentationAnchor()
+        resolvePresentationAnchor()
     }
 }
 
@@ -192,9 +208,9 @@ struct PasskeyRegistration {
 /// candidates, user denial, biometrics off, etc.) resolves to `nil` so the
 /// caller can treat it as a no-op without disturbing the sign-up flow.
 @MainActor
-final class MacOSPasskeyConditionalUpgradeAuthenticator: NSObject {
+final class PlatformPasskeyConditionalUpgradeAuthenticator: NSObject {
     private var continuation: CheckedContinuation<PasskeyRegistration?, Never>?
-    private var retainedSelf: MacOSPasskeyConditionalUpgradeAuthenticator?
+    private var retainedSelf: PlatformPasskeyConditionalUpgradeAuthenticator?
 
     func upgrade(
         relyingPartyIdentifier: String,
@@ -231,7 +247,7 @@ final class MacOSPasskeyConditionalUpgradeAuthenticator: NSObject {
     }
 }
 
-extension MacOSPasskeyConditionalUpgradeAuthenticator: ASAuthorizationControllerDelegate {
+extension PlatformPasskeyConditionalUpgradeAuthenticator: ASAuthorizationControllerDelegate {
     func authorizationController(
         controller: ASAuthorizationController,
         didCompleteWithAuthorization authorization: ASAuthorization
@@ -255,11 +271,9 @@ extension MacOSPasskeyConditionalUpgradeAuthenticator: ASAuthorizationController
     }
 }
 
-extension MacOSPasskeyConditionalUpgradeAuthenticator: ASAuthorizationControllerPresentationContextProviding {
+extension PlatformPasskeyConditionalUpgradeAuthenticator: ASAuthorizationControllerPresentationContextProviding {
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        NSApplication.shared.keyWindow
-            ?? NSApplication.shared.mainWindow
-            ?? ASPresentationAnchor()
+        resolvePresentationAnchor()
     }
 }
 
@@ -297,9 +311,9 @@ struct PasskeyAccountCreation {
 /// iCloud, the user confirms with biometrics, and the system generates the
 /// passkey. The caller never collects a username — it arrives back here.
 @MainActor
-final class MacOSPasskeyAccountCreationAuthenticator: NSObject {
+final class PlatformPasskeyAccountCreationAuthenticator: NSObject {
     private var continuation: CheckedContinuation<PasskeyAccountCreation, Error>?
-    private var retainedSelf: MacOSPasskeyAccountCreationAuthenticator?
+    private var retainedSelf: PlatformPasskeyAccountCreationAuthenticator?
 
     func createAccount(
         relyingPartyIdentifier: String,
@@ -339,7 +353,7 @@ final class MacOSPasskeyAccountCreationAuthenticator: NSObject {
     }
 }
 
-extension MacOSPasskeyAccountCreationAuthenticator: ASAuthorizationControllerDelegate {
+extension PlatformPasskeyAccountCreationAuthenticator: ASAuthorizationControllerDelegate {
     func authorizationController(
         controller: ASAuthorizationController,
         didCompleteWithAuthorization authorization: ASAuthorization
@@ -384,11 +398,9 @@ extension MacOSPasskeyAccountCreationAuthenticator: ASAuthorizationControllerDel
     }
 }
 
-extension MacOSPasskeyAccountCreationAuthenticator: ASAuthorizationControllerPresentationContextProviding {
+extension PlatformPasskeyAccountCreationAuthenticator: ASAuthorizationControllerPresentationContextProviding {
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        NSApplication.shared.keyWindow
-            ?? NSApplication.shared.mainWindow
-            ?? ASPresentationAnchor()
+        resolvePresentationAnchor()
     }
 }
 #endif

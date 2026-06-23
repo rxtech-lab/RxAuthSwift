@@ -470,8 +470,8 @@ public final class OAuthManager: Sendable {
 
         let allowedCredentialIDs = options.allowedCredentialIDs.compactMap(Base64URL.decode)
 
-        #if os(macOS)
-        let assertion = try await MacOSPasskeyAuthenticator().authenticate(
+        #if os(macOS) || os(iOS)
+        let assertion = try await PlatformPasskeyAuthenticator().authenticate(
             relyingPartyIdentifier: relyingPartyIdentifier,
             challenge: challenge,
             allowedCredentialIDs: allowedCredentialIDs
@@ -544,8 +544,8 @@ public final class OAuthManager: Sendable {
             throw OAuthError.authenticationFailed("Invalid passkey registration user ID")
         }
 
-        #if os(macOS)
-        let registration = try await MacOSPasskeyRegistrationAuthenticator().register(
+        #if os(macOS) || os(iOS)
+        let registration = try await PlatformPasskeyRegistrationAuthenticator().register(
             relyingPartyIdentifier: relyingPartyIdentifier,
             challenge: challenge,
             name: options.username ?? trimmedUsername,
@@ -621,8 +621,8 @@ public final class OAuthManager: Sendable {
             throw OAuthError.passkeyUnavailable
         }
 
-        #if os(macOS)
-        let creation = try await MacOSPasskeyAccountCreationAuthenticator().createAccount(
+        #if os(macOS) || os(iOS)
+        let creation = try await PlatformPasskeyAccountCreationAuthenticator().createAccount(
             relyingPartyIdentifier: relyingPartyIdentifier,
             challenge: challenge,
             userID: userID,
@@ -672,7 +672,7 @@ public final class OAuthManager: Sendable {
     /// the system passkey UI (`MacOSPasskeyRegistrationAuthenticator`) and
     /// propagates errors so the UI can react.
     private func performInteractivePasskeyUpgrade() async throws {
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         guard supportsPasskeyUpgrade,
               let challengeURL = configuration.passkeyUpgradeChallengeURL,
               let verificationURL = configuration.passkeyUpgradeVerificationURL
@@ -713,7 +713,7 @@ public final class OAuthManager: Sendable {
 
         let displayName = options.username ?? currentUser?.email ?? currentUser?.name ?? "Account"
 
-        let registration = try await MacOSPasskeyRegistrationAuthenticator().register(
+        let registration = try await PlatformPasskeyRegistrationAuthenticator().register(
             relyingPartyIdentifier: relyingPartyIdentifier,
             challenge: challenge,
             name: displayName,
@@ -757,7 +757,7 @@ public final class OAuthManager: Sendable {
     }
 
     private func attemptAutomaticPasskeyUpgrade() async {
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         guard supportsPasskeyUpgrade,
               let challengeURL = configuration.passkeyUpgradeChallengeURL,
               let verificationURL = configuration.passkeyUpgradeVerificationURL
@@ -803,7 +803,7 @@ public final class OAuthManager: Sendable {
 
             let displayName = options.username ?? currentUser?.email ?? currentUser?.name ?? "Account"
 
-            guard let registration = await MacOSPasskeyConditionalUpgradeAuthenticator().upgrade(
+            guard let registration = await PlatformPasskeyConditionalUpgradeAuthenticator().upgrade(
                 relyingPartyIdentifier: relyingPartyIdentifier,
                 challenge: challenge,
                 name: displayName,
@@ -1348,7 +1348,7 @@ private struct PasskeyAccountCreationVerifyRequest: Encodable {
     }
 }
 
-#if os(macOS)
+#if os(macOS) || os(iOS)
 private extension PasskeyAccountCreationVerifyRequest {
     init(
         clientID: String,
@@ -1393,7 +1393,7 @@ private struct PasskeyUpgradeVerificationRequest: Encodable {
     }
 }
 
-#if os(macOS)
+#if os(macOS) || os(iOS)
 private extension PasskeyUpgradeVerificationRequest {
     init(sessionID: String?, name: String?, registration: PasskeyRegistration) {
         let credentialID = Base64URL.encode(registration.credentialID)
