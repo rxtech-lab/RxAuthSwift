@@ -8,11 +8,10 @@ public struct RxSignInView<Header: View>: View {
     @State private var fieldErrors: [String: String] = [:]
     @State private var isAppearing = false
     @State private var hasAttemptedSchemaLoad = false
-    #if os(macOS)
     @FocusState private var focusedField: String?
     @Namespace private var glassNamespace
-    #endif
     private let appearance: RxSignInAppearance
+    private let style: RxSignInStyle
     private let customHeader: Header?
     private let onAuthSuccess: (() -> Void)?
     private let onAuthFailed: ((Error) -> Void)?
@@ -22,11 +21,13 @@ public struct RxSignInView<Header: View>: View {
     public init(
         manager: OAuthManager,
         appearance: RxSignInAppearance = RxSignInAppearance(),
+        style: RxSignInStyle = .web,
         onAuthSuccess: (() -> Void)? = nil,
         onAuthFailed: ((Error) -> Void)? = nil
     ) where Header == Never {
         self.manager = manager
         self.appearance = appearance
+        self.style = style
         self.customHeader = nil
         self.onAuthSuccess = onAuthSuccess
         self.onAuthFailed = onAuthFailed
@@ -37,12 +38,14 @@ public struct RxSignInView<Header: View>: View {
     public init(
         manager: OAuthManager,
         appearance: RxSignInAppearance = RxSignInAppearance(),
+        style: RxSignInStyle = .web,
         onAuthSuccess: (() -> Void)? = nil,
         onAuthFailed: ((Error) -> Void)? = nil,
         @ViewBuilder header: () -> Header
     ) {
         self.manager = manager
         self.appearance = appearance
+        self.style = style
         self.customHeader = header()
         self.onAuthSuccess = onAuthSuccess
         self.onAuthFailed = onAuthFailed
@@ -50,27 +53,77 @@ public struct RxSignInView<Header: View>: View {
 
     public var body: some View {
         ZStack {
-            #if os(macOS)
             if appearance.showsAnimatedBackground {
                 AnimatedGradientBackground(
                     accentColor: appearance.accentColor,
                     secondaryColor: appearance.secondaryColor
                 )
             }
-            macOSContent
-            #else
-            AnimatedGradientBackground(
-                accentColor: appearance.accentColor,
-                secondaryColor: appearance.secondaryColor
-            )
-            iOSContent
-            #endif
+            content
         }
         .animation(.default, value: manager.errorMessage)
     }
 
-    #if os(macOS)
-    private var macOSContent: some View {
+    /// Picks the credential presentation. macOS only ships the native form, so
+    /// the `style` is honored on iOS and ignored on macOS.
+    @ViewBuilder
+    private var content: some View {
+        #if os(macOS)
+        nativeContent
+        #else
+        switch style {
+        case .web:
+            webContent
+        case .native:
+            nativeContent
+        }
+        #endif
+    }
+
+    // MARK: - Web Flow (iOS)
+
+    #if os(iOS)
+    private var webContent: some View {
+        VStack(spacing: 32) {
+            Spacer()
+            if let customHeader {
+                customHeader
+            } else {
+                defaultHeader
+            }
+            Spacer()
+
+            if let errorMessage = manager.errorMessage {
+                AuthErrorBanner(message: errorMessage)
+                    .padding(.horizontal, 24)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            VStack(spacing: 12) {
+                PrimaryAuthButton(
+                    title: appearance.signInButtonTitle,
+                    isLoading: manager.isAuthenticating,
+                    accentColor: appearance.accentColor
+                ) {
+                    Task {
+                        do {
+                            try await manager.authenticate()
+                            onAuthSuccess?()
+                        } catch {
+                            onAuthFailed?(error)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 32)
+            .padding(.bottom, 48)
+        }
+    }
+    #endif
+
+    // MARK: - Native Form (macOS + iOS)
+
+    private var nativeContent: some View {
         ZStack(alignment: .top) {
             ScrollView {
                 VStack(spacing: 0) {
@@ -282,44 +335,6 @@ public struct RxSignInView<Header: View>: View {
         .padding(.top, 16)
         .padding(.horizontal, 32)
     }
-    #else
-    private var iOSContent: some View {
-        VStack(spacing: 32) {
-            Spacer()
-            if let customHeader {
-                customHeader
-            } else {
-                defaultHeader
-            }
-            Spacer()
-
-            if let errorMessage = manager.errorMessage {
-                AuthErrorBanner(message: errorMessage)
-                    .padding(.horizontal, 24)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            VStack(spacing: 12) {
-                PrimaryAuthButton(
-                    title: appearance.signInButtonTitle,
-                    isLoading: manager.isAuthenticating,
-                    accentColor: appearance.accentColor
-                ) {
-                    Task {
-                        do {
-                            try await manager.authenticate()
-                            onAuthSuccess?()
-                        } catch {
-                            onAuthFailed?(error)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 48)
-        }
-    }
-    #endif
 
     @ViewBuilder
     private var defaultHeader: some View {
@@ -344,7 +359,6 @@ public struct RxSignInView<Header: View>: View {
         }
     }
 
-    #if os(macOS)
     private var compactHeader: some View {
         VStack(spacing: 14) {
             compactIcon
@@ -399,6 +413,22 @@ public struct RxSignInView<Header: View>: View {
         mode == .signIn ? manager.signInSchema : manager.signUpSchema
     }
 
+    /// Methods to surface in the native form for the current platform.
+    ///
+    /// iOS passkey ceremonies are not yet implemented in `OAuthManager` (they
+    /// throw `.passkeyUnavailable`), so on iOS we only surface password-based
+    /// methods to avoid presenting buttons that always fail. If filtering would
+    /// leave nothing, we fall back to the full server-provided list. Remove this
+    /// filter once an iOS passkey authenticator lands.
+    private func displayMethods(_ schema: AuthUISchema) -> [AuthUISchema.SupportedMethod] {
+        #if os(iOS)
+        let filtered = schema.supportedMethods.filter { $0.id == .password }
+        return filtered.isEmpty ? schema.supportedMethods : filtered
+        #else
+        return schema.supportedMethods
+        #endif
+    }
+
     private var nativeCredentialForm: some View {
         VStack(spacing: 18) {
             modeTogglePill
@@ -415,8 +445,9 @@ public struct RxSignInView<Header: View>: View {
 
                 GlassEffectContainer(spacing: 16) {
                     VStack(spacing: 14) {
-                        let primaryMethods = schema.supportedMethods.filter { $0.primary }
-                        let secondaryMethods = schema.supportedMethods.filter { !$0.primary }
+                        let methods = displayMethods(schema)
+                        let primaryMethods = methods.filter { $0.primary }
+                        let secondaryMethods = methods.filter { !$0.primary }
                         let orderedMethods = primaryMethods + secondaryMethods
 
                         ForEach(Array(orderedMethods.enumerated()), id: \.element.id) { index, method in
@@ -615,6 +646,11 @@ public struct RxSignInView<Header: View>: View {
                 .focused($focusedField, equals: field.key)
                 .submitLabel(.next)
                 .onSubmit { advanceFocus(from: field.key) }
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .keyboardType(field.type == .email ? .emailAddress : .default)
+                #endif
                 .accessibilityIdentifier("\(field.key)-field")
         }
         .padding(.horizontal, 14)
@@ -783,7 +819,6 @@ public struct RxSignInView<Header: View>: View {
             }
         }
     }
-    #endif
 }
 
 private enum NativeAuthMode: Hashable {
@@ -847,6 +882,7 @@ private enum NativeAuthMode: Hashable {
 
 #if DEBUG
 private struct GroupedMethodsPreview: View {
+    private let style: RxSignInStyle
     @State private var manager: OAuthManager = {
         let manager = OAuthManager(
             configuration: RxAuthConfiguration(
@@ -876,13 +912,22 @@ private struct GroupedMethodsPreview: View {
         return manager
     }()
 
+    init(style: RxSignInStyle = .native) {
+        self.style = style
+    }
+
     var body: some View {
-        RxSignInView(manager: manager)
+        RxSignInView(manager: manager, style: style)
     }
 }
 
 #Preview("Grouped Methods (1 primary + 2 secondary)") {
     GroupedMethodsPreview()
+        .preferredColorScheme(.dark)
+}
+
+#Preview("iOS Native Form") {
+    GroupedMethodsPreview(style: .native)
         .preferredColorScheme(.dark)
 }
 #endif
