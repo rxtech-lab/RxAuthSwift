@@ -8,6 +8,11 @@ public struct RxSignInView<Header: View>: View {
     @State private var fieldErrors: [String: String] = [:]
     @State private var isAppearing = false
     @State private var hasAttemptedSchemaLoad = false
+    /// The method the user actually tapped, so only that button spins.
+    @State private var activeMethod: AuthUISchema.SupportedMethod.MethodID?
+    @State private var stage: FormStage = .methodPicker
+    /// The method whose credentials the form is currently collecting.
+    @State private var pendingMethod: AuthUISchema.SupportedMethod?
     @FocusState private var focusedField: String?
     @Namespace private var glassNamespace
     private let appearance: RxSignInAppearance
@@ -125,40 +130,7 @@ public struct RxSignInView<Header: View>: View {
 
     private var nativeContent: some View {
         ZStack(alignment: .top) {
-            ScrollView {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 32)
-
-                    GlassEffectContainer(spacing: 20) {
-                        VStack(spacing: 24) {
-                            if let customHeader {
-                                customHeader
-                                    .scaleEffect(isAppearing ? 1 : 0.9)
-                                    .opacity(isAppearing ? 1 : 0)
-                            } else {
-                                compactHeader
-                                    .scaleEffect(isAppearing ? 1 : 0.9)
-                                    .opacity(isAppearing ? 1 : 0)
-                            }
-
-                            nativeCredentialForm
-                        }
-                        .padding(32)
-                        .frame(minWidth: 360, maxWidth: 400, minHeight: 480, alignment: .top)
-                    }
-                    .padding(.horizontal, 32)
-                    .offset(y: isAppearing ? 0 : 20)
-                    .animation(.spring(response: 0.6, dampingFraction: 0.8), value: isAppearing)
-
-                    Spacer(minLength: 32)
-                }
-                .frame(maxWidth: .infinity, minHeight: 580)
-            }
-            .onAppear {
-                withAnimation(.easeOut(duration: 0.5)) {
-                    isAppearing = true
-                }
-            }
+            formScrollView
 
             // Error overlay
             if let errorMessage = manager.errorMessage {
@@ -180,6 +152,62 @@ public struct RxSignInView<Header: View>: View {
             }
         )) {
             passkeyOfferSheet
+        }
+    }
+
+    private var formScrollView: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Equal-weight spacers above and below center the brand and
+                    // controls as one optical group, while the mode footer stays
+                    // pinned to the bottom of the screen.
+                    Spacer(minLength: Layout.topInset)
+
+                    GlassEffectContainer(spacing: 20) {
+                        VStack(spacing: Layout.cardSpacing) {
+                            Group {
+                                if let customHeader {
+                                    customHeader
+                                } else {
+                                    compactHeader
+                                }
+                            }
+                            .scaleEffect(isAppearing ? 1 : 0.92)
+                            .opacity(isAppearing ? 1 : 0)
+
+                            nativeCredentialForm
+                        }
+                        .padding(Layout.cardPadding)
+                        .frame(
+                            minWidth: Layout.cardMinWidth,
+                            maxWidth: Layout.cardMaxWidth,
+                            alignment: .top
+                        )
+                    }
+                    .offset(y: isAppearing ? 0 : 24)
+                    .opacity(isAppearing ? 1 : 0)
+                    .animation(.spring(response: 0.6, dampingFraction: 0.85), value: isAppearing)
+
+                    Spacer(minLength: Layout.topInset)
+
+                    modeFooter
+                        .padding(.top, 24)
+                        .opacity(isAppearing ? 1 : 0)
+                }
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                .padding(.horizontal, Layout.outerPadding)
+            }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        #if os(iOS)
+        .scrollDismissesKeyboard(.interactively)
+        .sensoryFeedback(.error, trigger: manager.errorMessage) { _, new in new != nil }
+        #endif
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.5)) {
+                isAppearing = true
+            }
         }
     }
 
@@ -360,50 +388,57 @@ public struct RxSignInView<Header: View>: View {
     }
 
     private var compactHeader: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 20) {
             compactIcon
                 .glassEffectID("header-icon", in: glassNamespace)
 
-            VStack(spacing: 6) {
-                if let schemaTitle = currentSchema?.title, !schemaTitle.isEmpty {
-                    Text(schemaTitle)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(.primary)
-                } else {
-                    Text(appearance.title)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(.primary)
-                }
+            VStack(spacing: 7) {
+                headerTitle
+                    .font(HeaderMetrics.titleFont)
+                    .foregroundStyle(.primary)
+                    .contentTransition(.opacity)
 
                 Text(appearance.subtitle)
-                    .font(.callout)
+                    .font(.system(size: 15))
                     .foregroundStyle(.secondary)
             }
             .multilineTextAlignment(.center)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: mode)
         }
+    }
+
+    private var headerTitle: Text {
+        if let title = currentSchema?.title, !title.isEmpty {
+            return Text(title)
+        }
+        return Text(appearance.title)
     }
 
     @ViewBuilder
     private var compactIcon: some View {
+        let side = HeaderMetrics.iconSide
+
         switch appearance.icon {
+        // A bare symbol reads as a mark; wrapping it in a tinted tile just
+        // imitates an app icon badly, so only real images get a container.
         case .systemImage(let name):
             Image(systemName: name)
-                .font(.system(size: 32, weight: .semibold))
-                .foregroundStyle(appearance.accentColor)
-                .frame(width: 64, height: 64)
-                .glassEffect(.regular.tint(appearance.accentColor.opacity(0.3)), in: .rect(cornerRadius: 18))
+                .font(.system(size: side * 0.78, weight: .medium))
+                .foregroundStyle(appearance.accentColor.gradient)
+                .frame(height: side)
+                .shadow(color: appearance.accentColor.opacity(0.35), radius: 24, y: 8)
         case .image(let image):
             image
                 .resizable()
                 .scaledToFit()
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(width: side, height: side)
+                .clipShape(RoundedRectangle(cornerRadius: side * 0.3, style: .continuous))
         case .assetImage(let name, let bundle):
             Image(name, bundle: bundle)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(width: side, height: side)
+                .clipShape(RoundedRectangle(cornerRadius: side * 0.3, style: .continuous))
         case .none:
             EmptyView()
         }
@@ -414,39 +449,21 @@ public struct RxSignInView<Header: View>: View {
     }
 
     private var nativeCredentialForm: some View {
-        VStack(spacing: 18) {
-            modeTogglePill
-
+        VStack(spacing: 0) {
             if let schema = currentSchema {
-                GlassEffectContainer(spacing: 12) {
-                    VStack(spacing: 12) {
-                        ForEach(schema.fields) { field in
-                            renderField(field)
-                        }
+                ZStack(alignment: .top) {
+                    if stage == .methodPicker {
+                        methodPickerStage(schema)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
+                    if stage == .credentials {
+                        credentialsStage(schema)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
-                .animation(.spring(response: 0.4, dampingFraction: 0.85), value: mode)
-
-                GlassEffectContainer(spacing: 16) {
-                    VStack(spacing: 14) {
-                        let methods = schema.supportedMethods
-                        let primaryMethods = methods.filter { $0.primary }
-                        let secondaryMethods = methods.filter { !$0.primary }
-                        let orderedMethods = primaryMethods + secondaryMethods
-
-                        ForEach(Array(orderedMethods.enumerated()), id: \.element.id) { index, method in
-                            if index == primaryMethods.count, !primaryMethods.isEmpty, !secondaryMethods.isEmpty {
-                                orDivider
-                            }
-                            methodButton(method, schema: schema)
-                                .glassEffectTransition(.materialize)
-                        }
-                    }
-                }
-                .padding(.top, 6)
             } else if manager.isLoadingSchema || !hasAttemptedSchemaLoad {
                 ProgressView()
-                    .padding(.vertical, 40)
+                    .padding(.vertical, 56)
             } else {
                 schemaErrorFallback
             }
@@ -456,6 +473,198 @@ public struct RxSignInView<Header: View>: View {
                 await manager.loadUISchema()
             }
             hasAttemptedSchemaLoad = true
+        }
+    }
+
+    // MARK: - Stage 1: pick a method
+
+    /// The landing stage: branding plus the ways in, with no form. Methods that
+    /// need typed input hand off to `credentialsStage`; the rest fire straight
+    /// away, so passkey sign-in never shows a form it doesn't use.
+    private func methodPickerStage(_ schema: AuthUISchema) -> some View {
+        let prominentMethods = schema.supportedMethods.filter(\.primary)
+        let alternativeMethods = schema.supportedMethods.filter { !$0.primary }
+
+        return VStack(spacing: 0) {
+            GlassEffectContainer(spacing: 16) {
+                VStack(spacing: 10) {
+                    ForEach(prominentMethods) { method in
+                        methodButton(method, schema: schema)
+                            .glassEffectTransition(.materialize)
+                    }
+
+                    if !alternativeMethods.isEmpty {
+                        if !prominentMethods.isEmpty {
+                            orDivider
+                                .padding(.vertical, 6)
+                        }
+
+                        ForEach(alternativeMethods) { method in
+                            methodButton(method, schema: schema)
+                                .glassEffectTransition(.materialize)
+                        }
+                    }
+                }
+            }
+
+            linkRow(schema)
+                .padding(.top, 20)
+        }
+    }
+
+    // MARK: - Stage 2: collect credentials for the chosen method
+
+    private func credentialsStage(_ schema: AuthUISchema) -> some View {
+        let fields = visibleFields(schema)
+
+        return VStack(spacing: 0) {
+            backToMethodsButton
+                .padding(.bottom, 18)
+
+            GlassEffectContainer(spacing: 12) {
+                VStack(spacing: 10) {
+                    ForEach(Array(fields.enumerated()), id: \.element.id) { index, field in
+                        renderField(field, isLast: index == fields.count - 1)
+                    }
+                }
+            }
+
+            // Sits tight under the password row it belongs to, rather than
+            // floating midway between the form and the button.
+            // The gap below has to live on the button: when the schema carries
+            // no links this row collapses to an EmptyView, and padding on that
+            // collapses with it.
+            linkRow(schema, alignment: .trailing)
+                .padding(.top, 12)
+
+            if let pendingMethod {
+                AuthMethodButton(
+                    method: pendingMethod,
+                    accentColor: appearance.accentColor,
+                    isBusy: manager.isAuthenticating,
+                    isRunning: manager.isAuthenticating && activeMethod == pendingMethod.id,
+                    namespace: glassNamespace,
+                    prominent: true,
+                    showsSymbol: false,
+                    glassIDSuffix: "-submit"
+                ) {
+                    run(pendingMethod, schema: schema)
+                }
+                .padding(.top, 24)
+            }
+        }
+        .onAppear {
+            focusedField = fields.first?.key
+        }
+    }
+
+    private var backToMethodsButton: some View {
+        Button {
+            focusedField = nil
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                stage = .methodPicker
+                pendingMethod = nil
+                fieldErrors = [:]
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(mode == .signIn ? "All sign-in options" : "All sign-up options")
+                    .font(.system(size: 14, weight: .medium))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(appearance.accentColor)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.pressScale(0.98))
+        .disabled(manager.isAuthenticating)
+        .accessibilityIdentifier("back-to-methods-button")
+    }
+
+    // MARK: - Method routing
+
+    /// Fields the chosen method actually needs. Passkey flows never collect a
+    /// password, so those rows are dropped rather than shown and ignored.
+    private func fields(
+        for method: AuthUISchema.SupportedMethod?,
+        in schema: AuthUISchema
+    ) -> [AuthUISchema.Field] {
+        guard let method else { return schema.fields }
+        switch method.id {
+        case .password:
+            return schema.fields
+        case .passkey, .passkeyAccountCreation:
+            return schema.fields.filter { !$0.isPassword }
+        }
+    }
+
+    private func visibleFields(_ schema: AuthUISchema) -> [AuthUISchema.Field] {
+        fields(for: pendingMethod, in: schema)
+    }
+
+    /// Passkey *sign-in* identifies the user by itself, and system account
+    /// creation collects everything in the OS sheet — only flows that still
+    /// need typed input open the form.
+    private func requiresCredentials(
+        _ method: AuthUISchema.SupportedMethod,
+        schema: AuthUISchema
+    ) -> Bool {
+        guard !fields(for: method, in: schema).isEmpty else { return false }
+        switch method.id {
+        case .password: return true
+        case .passkey: return mode == .signUp
+        case .passkeyAccountCreation: return false
+        }
+    }
+
+    private func select(_ method: AuthUISchema.SupportedMethod, schema: AuthUISchema) {
+        focusedField = nil
+        guard requiresCredentials(method, schema: schema) else {
+            run(method, schema: schema)
+            return
+        }
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            pendingMethod = method
+            stage = .credentials
+            fieldErrors = [:]
+        }
+    }
+
+    private func run(_ method: AuthUISchema.SupportedMethod, schema: AuthUISchema) {
+        focusedField = nil
+        switch method.id {
+        case .password:
+            submitPrimary(schema: schema)
+        case .passkey:
+            submitPasskeyAction()
+        case .passkeyAccountCreation:
+            submitPasskeyAccountCreationAction()
+        }
+    }
+
+    /// Renders schema-provided links (e.g. "Forgot password?"). Relative hrefs
+    /// are skipped — the view has no base URL to resolve them against.
+    @ViewBuilder
+    private func linkRow(
+        _ schema: AuthUISchema,
+        alignment: HorizontalAlignment = .center
+    ) -> some View {
+        let usable = (schema.links ?? []).compactMap { link -> (AuthUISchema.Link, URL)? in
+            guard let url = URL(string: link.href), url.scheme != nil else { return nil }
+            return (link, url)
+        }
+
+        if !usable.isEmpty {
+            HStack(spacing: 18) {
+                if alignment != .leading { Spacer(minLength: 0) }
+                ForEach(usable, id: \.0.id) { link, url in
+                    Link(link.label, destination: url)
+                        .font(.system(size: 14))
+                        .tint(appearance.accentColor)
+                }
+                if alignment != .trailing { Spacer(minLength: 0) }
+            }
         }
     }
 
@@ -475,226 +684,92 @@ public struct RxSignInView<Header: View>: View {
         .padding(.vertical, 32)
     }
 
-    @ViewBuilder
-    private func renderField(_ field: AuthUISchema.Field) -> some View {
-        let binding = Binding<String>(
-            get: { fieldValues[field.key] ?? "" },
-            set: { newValue in
-                fieldValues[field.key] = newValue
-                fieldErrors[field.key] = nil
-            }
+    private func renderField(_ field: AuthUISchema.Field, isLast: Bool) -> some View {
+        AuthCredentialField(
+            field: field,
+            text: Binding<String>(
+                get: { fieldValues[field.key] ?? "" },
+                set: { newValue in
+                    fieldValues[field.key] = newValue
+                    fieldErrors[field.key] = nil
+                }
+            ),
+            error: fieldErrors[field.key],
+            accentColor: appearance.accentColor,
+            isSignUp: mode == .signUp,
+            isLast: isLast,
+            namespace: glassNamespace,
+            focusedField: $focusedField,
+            onSubmit: { advanceFocus(from: field.key) }
         )
-        VStack(alignment: .leading, spacing: 4) {
-            if field.isPassword {
-                secureCredentialField(field: field, text: binding)
-            } else {
-                credentialField(field: field, text: binding)
-            }
-            if let error = fieldErrors[field.key] {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(.leading, 14)
-                    .transition(.opacity)
-            }
-        }
     }
 
     private func methodButton(_ method: AuthUISchema.SupportedMethod, schema: AuthUISchema) -> some View {
-        Button {
-            switch method.id {
-            case .password:
-                submitPrimary(schema: schema)
-            case .passkey:
-                submitPasskeyAction()
-            case .passkeyAccountCreation:
-                submitPasskeyAccountCreationAction()
-            }
-        } label: {
-            ZStack {
-                HStack(spacing: 8) {
-                    if method.id == .passkey || method.id == .passkeyAccountCreation {
-                        Image(systemName: "person.badge.key.fill")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(method.primary ? Color.white : appearance.accentColor)
-                    }
-                    Text(method.label)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(method.primary ? Color.white : .primary)
+        AuthMethodButton(
+            method: method,
+            accentColor: appearance.accentColor,
+            isBusy: manager.isAuthenticating,
+            isRunning: manager.isAuthenticating && activeMethod == method.id,
+            namespace: glassNamespace
+        ) {
+            select(method, schema: schema)
+        }
+    }
+
+    /// Switching between sign-in and sign-up reads as fine print at the bottom
+    /// rather than a second tinted control competing with the call to action.
+    private var modeFooter: some View {
+        HStack(spacing: 5) {
+            Text(mode == .signIn ? "Don't have an account?" : "Already have an account?")
+                .foregroundStyle(.secondary)
+
+            Button {
+                focusedField = nil
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                    mode = mode == .signIn ? .signUp : .signIn
+                    stage = .methodPicker
+                    pendingMethod = nil
+                    fieldErrors = [:]
                 }
-                .opacity(manager.isAuthenticating ? 0 : 1)
-
-                if manager.isAuthenticating, isCurrentSubmitMethod(method) {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .controlSize(.small)
-                }
+            } label: {
+                Text(mode == .signIn ? "Sign Up" : "Sign In")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(appearance.accentColor)
+                    .contentShape(.rect)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 44)
-            .glassEffect(
-                method.primary
-                    ? .regular.tint(appearance.accentColor).interactive()
-                    : .regular.interactive(),
-                in: .rect(cornerRadius: 12)
-            )
+            .buttonStyle(.pressScale(0.96))
+            .disabled(manager.isAuthenticating)
+            .accessibilityIdentifier("auth-mode-picker")
         }
-        .buttonStyle(.plain)
-        .glassEffectID("method-\(method.id.rawValue)", in: glassNamespace)
-        .disabled(manager.isAuthenticating)
-        .opacity(manager.isAuthenticating ? 0.7 : 1)
-        .keyboardShortcut(method.primary ? .defaultAction : nil)
-        .accessibilityIdentifier(accessibilityIdentifier(for: method))
-    }
-
-    private func accessibilityIdentifier(for method: AuthUISchema.SupportedMethod) -> String {
-        switch method.id {
-        case .password: return "sign-in-button"
-        case .passkey: return "passkey-sign-in-button"
-        case .passkeyAccountCreation: return "passkey-account-creation-button"
-        }
-    }
-
-    private func isCurrentSubmitMethod(_ method: AuthUISchema.SupportedMethod) -> Bool {
-        // Best-effort indicator; primary method shows progress when authenticating.
-        method.primary
-    }
-
-    private var modeTogglePill: some View {
-        HStack(spacing: 0) {
-            modeTab(.signIn, label: "Sign In")
-            modeTab(.signUp, label: "Sign Up")
-        }
-        .padding(4)
-        .glassEffect(in: .capsule)
-        .glassEffectID("mode-toggle-container", in: glassNamespace)
-        .accessibilityIdentifier("auth-mode-picker")
-        .disabled(manager.isAuthenticating)
-    }
-
-    private func modeTab(_ value: NativeAuthMode, label: String) -> some View {
-        let isSelected = mode == value
-        return Button {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                mode = value
-            }
-        } label: {
-            Text(label)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isSelected ? Color.white : Color.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .padding(.horizontal, 20)
-                .background {
-                    if isSelected {
-                        Capsule()
-                            .fill(appearance.accentColor)
-                    }
-                }
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
+        .font(.system(size: 15))
+        .animation(.easeInOut(duration: 0.2), value: mode)
     }
 
     private var orDivider: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Rectangle()
-                .fill(.white.opacity(0.10))
+                .fill(.primary.opacity(0.1))
                 .frame(height: 0.5)
             Text("or")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+                .font(.system(size: 13))
+                .foregroundStyle(.tertiary)
+                .fixedSize()
             Rectangle()
-                .fill(.white.opacity(0.10))
+                .fill(.primary.opacity(0.1))
                 .frame(height: 0.5)
-        }
-    }
-
-    private func credentialField(
-        field: AuthUISchema.Field,
-        text: Binding<String>
-    ) -> some View {
-        let isFocused = focusedField == field.key
-        return HStack(spacing: 12) {
-            Image(systemName: iconName(for: field))
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(isFocused ? appearance.accentColor : Color.secondary)
-                .frame(width: 20)
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
-                .scaleEffect(isFocused ? 1.1 : 1.0)
-
-            TextField(field.placeholder ?? field.label, text: text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .focused($focusedField, equals: field.key)
-                .submitLabel(.next)
-                .onSubmit { advanceFocus(from: field.key) }
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .keyboardType(field.type == .email ? .emailAddress : .default)
-                #endif
-                .accessibilityIdentifier("\(field.key)-field")
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 44)
-        .glassEffect(
-            isFocused ? .regular.tint(appearance.accentColor.opacity(0.2)).interactive() : .regular.interactive(),
-            in: .rect(cornerRadius: 12)
-        )
-        .glassEffectID("field-\(field.key)", in: glassNamespace)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isFocused)
-    }
-
-    private func secureCredentialField(
-        field: AuthUISchema.Field,
-        text: Binding<String>
-    ) -> some View {
-        let isFocused = focusedField == field.key
-        return HStack(spacing: 12) {
-            Image(systemName: iconName(for: field))
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(isFocused ? appearance.accentColor : Color.secondary)
-                .frame(width: 20)
-                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
-                .scaleEffect(isFocused ? 1.1 : 1.0)
-
-            SecureField(field.placeholder ?? field.label, text: text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .focused($focusedField, equals: field.key)
-                .onSubmit {
-                    if let schema = currentSchema { submitPrimary(schema: schema) }
-                }
-                .accessibilityIdentifier("\(field.key)-field")
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 44)
-        .glassEffect(
-            isFocused ? .regular.tint(appearance.accentColor.opacity(0.2)).interactive() : .regular.interactive(),
-            in: .rect(cornerRadius: 12)
-        )
-        .glassEffectID("field-\(field.key)", in: glassNamespace)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isFocused)
-    }
-
-    private func iconName(for field: AuthUISchema.Field) -> String {
-        switch field.type {
-        case .email: return "envelope"
-        case .password: return "lock.fill"
-        case .name: return "person.text.rectangle"
-        case .text: return "person.crop.circle"
         }
     }
 
     private func advanceFocus(from key: String) {
-        guard let schema = currentSchema,
-              let idx = schema.fields.firstIndex(where: { $0.key == key })
-        else { return }
+        guard let schema = currentSchema else { return }
+        let fields = visibleFields(schema)
+        guard let idx = fields.firstIndex(where: { $0.key == key }) else { return }
+
         let next = idx + 1
-        if next < schema.fields.count {
-            focusedField = schema.fields[next].key
+        if next < fields.count {
+            focusedField = fields[next].key
+        } else if let pendingMethod {
+            run(pendingMethod, schema: schema)
         } else {
             submitPrimary(schema: schema)
         }
@@ -731,8 +806,10 @@ public struct RxSignInView<Header: View>: View {
         let identifier = primaryIdentifier(schema)
         let password = value(forKey: "password")
         let name = value(forKey: "name")
+        activeMethod = .password
 
         Task {
+            defer { activeMethod = nil }
             do {
                 switch mode {
                 case .signIn:
@@ -753,6 +830,9 @@ public struct RxSignInView<Header: View>: View {
                         fieldValues["name"] = ""
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                             mode = .signIn
+                            stage = .methodPicker
+                            pendingMethod = nil
+                            fieldErrors = [:]
                         }
                     }
                 }
@@ -773,8 +853,10 @@ public struct RxSignInView<Header: View>: View {
 
         let identifier = primaryIdentifier(schema)
         let name = value(forKey: "name")
+        activeMethod = .passkey
 
         Task {
+            defer { activeMethod = nil }
             do {
                 switch mode {
                 case .signIn:
@@ -794,7 +876,9 @@ public struct RxSignInView<Header: View>: View {
     /// reachable when the server emits the `passkey_account_creation`
     /// method in the signup schema.
     private func submitPasskeyAccountCreationAction() {
+        activeMethod = .passkeyAccountCreation
         Task {
+            defer { activeMethod = nil }
             do {
                 try await manager.createAccountWithPasskey()
                 onAuthSuccess?()
@@ -808,6 +892,43 @@ public struct RxSignInView<Header: View>: View {
 private enum NativeAuthMode: Hashable {
     case signIn
     case signUp
+}
+
+/// The native form is a two-step flow: pick how you want to sign in, then —
+/// only for the methods that need it — type credentials.
+private enum FormStage: Hashable {
+    case methodPicker
+    case credentials
+}
+
+/// Layout metrics for the native form. iOS goes edge-to-edge with a wide cap
+/// for iPad; macOS keeps the fixed-width panel it was designed around.
+private enum Layout {
+    #if os(iOS)
+    static let outerPadding: CGFloat = 24
+    static let cardPadding: CGFloat = 0
+    static let cardSpacing: CGFloat = 40
+    static let cardMinWidth: CGFloat? = nil
+    static let cardMaxWidth: CGFloat = 400
+    static let topInset: CGFloat = 24
+    #else
+    static let outerPadding: CGFloat = 32
+    static let cardPadding: CGFloat = 24
+    static let cardSpacing: CGFloat = 32
+    static let cardMinWidth: CGFloat? = 340
+    static let cardMaxWidth: CGFloat = 380
+    static let topInset: CGFloat = 28
+    #endif
+}
+
+private enum HeaderMetrics {
+    #if os(iOS)
+    static let iconSide: CGFloat = 64
+    static let titleFont: Font = .system(size: 28, weight: .bold)
+    #else
+    static let iconSide: CGFloat = 52
+    static let titleFont: Font = .system(size: 22, weight: .semibold)
+    #endif
 }
 
 // MARK: - Previews
