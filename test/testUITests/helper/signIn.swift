@@ -66,9 +66,18 @@ extension XCUIApplication {
             emailField.typeText("\n") // Press Enter to move to next field
         #elseif os(macOS)
 
+            // The native form opens on the method picker; pick password to
+            // reveal the credential fields.
+            let passwordMethodButton = buttons["sign-in-button"].firstMatch
+            XCTAssertTrue(
+                passwordMethodButton.waitForExistence(timeout: 30),
+                "Password sign-in method did not appear"
+            )
+            passwordMethodButton.click()
+
             let emailField = textFields["email-field"].firstMatch
             let emailFieldExists = emailField.waitForExistence(timeout: 30)
-            XCTAssertTrue(emailFieldExists, "Failed to sign in and reach dashboard")
+            XCTAssertTrue(emailFieldExists, "Email field did not appear after choosing password sign-in")
 
             let passwordField = secureTextFields["password-field"].firstMatch
 
