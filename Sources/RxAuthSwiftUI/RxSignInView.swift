@@ -10,6 +10,8 @@ public struct RxSignInView<Header: View>: View {
     @State private var hasAttemptedSchemaLoad = false
     /// The method the user actually tapped, so only that button spins.
     @State private var activeMethod: AuthUISchema.SupportedMethod.MethodID?
+    /// The identity provider (Google, GitHub, …) currently in the browser flow.
+    @State private var activeIdentityProvider: String?
     @State private var stage: FormStage = .methodPicker
     /// The method whose credentials the form is currently collecting.
     @State private var pendingMethod: AuthUISchema.SupportedMethod?
@@ -484,6 +486,11 @@ public struct RxSignInView<Header: View>: View {
     private func methodPickerStage(_ schema: AuthUISchema) -> some View {
         let prominentMethods = schema.supportedMethods.filter(\.primary)
         let alternativeMethods = schema.supportedMethods.filter { !$0.primary }
+        // Social providers join the alternatives list: they're other ways in,
+        // not a competing call to action, so they share that shape and sit
+        // under the same divider.
+        let identityProviders = schema.identityProviders ?? []
+        let hasAlternatives = !alternativeMethods.isEmpty || !identityProviders.isEmpty
 
         return VStack(spacing: 0) {
             GlassEffectContainer(spacing: 16) {
@@ -493,7 +500,7 @@ public struct RxSignInView<Header: View>: View {
                             .glassEffectTransition(.materialize)
                     }
 
-                    if !alternativeMethods.isEmpty {
+                    if hasAlternatives {
                         if !prominentMethods.isEmpty {
                             orDivider
                                 .padding(.vertical, 6)
@@ -501,6 +508,11 @@ public struct RxSignInView<Header: View>: View {
 
                         ForEach(alternativeMethods) { method in
                             methodButton(method, schema: schema)
+                                .glassEffectTransition(.materialize)
+                        }
+
+                        ForEach(identityProviders) { provider in
+                            identityProviderButton(provider)
                                 .glassEffectTransition(.materialize)
                         }
                     }
@@ -716,6 +728,18 @@ public struct RxSignInView<Header: View>: View {
         }
     }
 
+    private func identityProviderButton(_ provider: AuthUISchema.IdentityProvider) -> some View {
+        IdentityProviderButton(
+            provider: provider,
+            accentColor: appearance.accentColor,
+            isBusy: manager.isAuthenticating,
+            isRunning: manager.isAuthenticating && activeIdentityProvider == provider.id,
+            namespace: glassNamespace
+        ) {
+            signIn(with: provider)
+        }
+    }
+
     /// Switching between sign-in and sign-up reads as fine print at the bottom
     /// rather than a second tinted control competing with the call to action.
     private var modeFooter: some View {
@@ -871,6 +895,23 @@ public struct RxSignInView<Header: View>: View {
         }
     }
 
+    /// Social sign-in never needs typed input: the browser session carries the
+    /// user to the provider and back with an authorization code, and the
+    /// server creates the account on first use, so it works from either mode.
+    private func signIn(with provider: AuthUISchema.IdentityProvider) {
+        focusedField = nil
+        activeIdentityProvider = provider.id
+        Task {
+            defer { activeIdentityProvider = nil }
+            do {
+                try await manager.authenticate(identityProvider: provider)
+                onAuthSuccess?()
+            } catch {
+                onAuthFailed?(error)
+            }
+        }
+    }
+
     /// System-sheet account creation (iOS 26 / macOS 26): no fields, no
     /// validation — the OS sheet collects email/name from iCloud. Only
     /// reachable when the server emits the `passkey_account_creation`
@@ -1009,6 +1050,10 @@ private struct GroupedMethodsPreview: View {
             { "id": "password", "label": "Sign In", "primary": true },
             { "id": "passkey", "label": "Sign in with Passkey", "primary": false },
             { "id": "passkey_account_creation", "label": "Use iCloud Keychain", "primary": false }
+          ],
+          "identityProviders": [
+            { "id": "github", "label": "Continue with GitHub", "iconUrl": "https://auth.example.com/brand/github-invertocat-black.svg", "darkIconUrl": "https://auth.example.com/brand/github-invertocat-white.svg", "authorizationParameters": { "identity_provider": "github" } },
+            { "id": "google", "label": "Continue with Google", "iconUrl": "https://auth.example.com/brand/google-g.svg", "darkIconUrl": "https://auth.example.com/brand/google-g.svg", "authorizationParameters": { "identity_provider": "google" } }
           ]
         }
         """#
@@ -1026,7 +1071,7 @@ private struct GroupedMethodsPreview: View {
     }
 }
 
-#Preview("Grouped Methods (1 primary + 2 secondary)") {
+#Preview("Grouped Methods (1 primary + 2 secondary + social)") {
     GroupedMethodsPreview()
         .preferredColorScheme(.dark)
 }

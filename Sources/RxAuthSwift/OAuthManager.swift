@@ -99,7 +99,15 @@ public final class OAuthManager: Sendable {
         }
     }
 
-    public func authenticate() async throws {
+    /// Browser-based authorization-code + PKCE sign-in.
+    ///
+    /// - Parameter additionalAuthorizationParameters: Extra query items for the
+    ///   authorize request. Servers use these for hints such as
+    ///   `identity_provider`; keys that collide with the standard OAuth
+    ///   parameters are ignored so a hint can never break the core flow.
+    public func authenticate(
+        additionalAuthorizationParameters: [String: String] = [:]
+    ) async throws {
         isAuthenticating = true
         errorMessage = nil
         defer { isAuthenticating = false }
@@ -108,7 +116,10 @@ public final class OAuthManager: Sendable {
             let codeVerifier = PKCEHelper.generateCodeVerifier()
             let codeChallenge = PKCEHelper.generateCodeChallenge(from: codeVerifier)
 
-            guard let authorizeURL = buildAuthorizationURL(codeChallenge: codeChallenge) else {
+            guard let authorizeURL = buildAuthorizationURL(
+                codeChallenge: codeChallenge,
+                additionalParameters: additionalAuthorizationParameters
+            ) else {
                 throw OAuthError.invalidConfiguration
             }
 
@@ -124,6 +135,15 @@ public final class OAuthManager: Sendable {
             errorMessage = error.localizedDescription
             throw error
         }
+    }
+
+    /// Sign in through a third-party identity provider advertised by the
+    /// server's UI schema (Google, GitHub, …). Runs the same browser flow as
+    /// `authenticate()`, with the provider's `authorizationParameters` attached
+    /// so the server skips its own login page and hands off to the provider.
+    public func authenticate(identityProvider: AuthUISchema.IdentityProvider) async throws {
+        logger.info("Starting identity provider sign-in: \(identityProvider.id)")
+        try await authenticate(additionalAuthorizationParameters: identityProvider.authorizationParameters)
     }
 
     public func authenticate(username: String, password: String) async throws {
@@ -981,12 +1001,15 @@ public final class OAuthManager: Sendable {
             .data(using: .utf8)
     }
 
-    private func buildAuthorizationURL(codeChallenge: String) -> URL? {
+    func buildAuthorizationURL(
+        codeChallenge: String,
+        additionalParameters: [String: String] = [:]
+    ) -> URL? {
         guard var components = URLComponents(string: configuration.issuer + configuration.authorizePath) else {
             return nil
         }
 
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "client_id", value: configuration.clientID),
             URLQueryItem(name: "redirect_uri", value: configuration.redirectURI),
@@ -994,6 +1017,13 @@ public final class OAuthManager: Sendable {
             URLQueryItem(name: "code_challenge", value: codeChallenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
         ]
+
+        let reserved = Set(queryItems.map(\.name))
+        for (name, value) in additionalParameters.sorted(by: { $0.key < $1.key })
+        where !reserved.contains(name) {
+            queryItems.append(URLQueryItem(name: name, value: value))
+        }
+        components.queryItems = queryItems
 
         return components.url
     }

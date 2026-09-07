@@ -17,7 +17,12 @@ surface. It renders from the manager's server-driven `AuthUISchema` when
 available, falling back to sensible defaults, and automatically loads the
 schema on first appearance. On macOS it shows native username/password fields
 and an optional animated gradient background; passkey buttons appear when the
-manager reports the matching capability.
+manager reports the matching capability. When the sign-in schema lists
+`identityProviders`, the native method picker also shows a "Continue with …"
+row per provider, with the brand mark streamed from the schema's `iconUrl` /
+`darkIconUrl` and rendered by SwiftDraw; tapping one runs
+`OAuthManager.authenticate(identityProvider:)` through the system browser
+session.
 
 ### Simple initializer (appearance struct)
 

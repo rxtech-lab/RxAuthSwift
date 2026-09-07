@@ -16,7 +16,28 @@ public struct AuthUISchema: Codable, Sendable, Equatable {
     public let submitLabel: String
     public let fields: [Field]
     public let supportedMethods: [SupportedMethod]
+    /// Third-party identity providers (Google, GitHub, …) the server will
+    /// broker on the client's behalf. Absent or empty when none are enabled.
+    public let identityProviders: [IdentityProvider]?
     public let links: [Link]?
+
+    public init(
+        flow: Flow,
+        title: String,
+        submitLabel: String,
+        fields: [Field],
+        supportedMethods: [SupportedMethod],
+        identityProviders: [IdentityProvider]? = nil,
+        links: [Link]? = nil
+    ) {
+        self.flow = flow
+        self.title = title
+        self.submitLabel = submitLabel
+        self.fields = fields
+        self.supportedMethods = supportedMethods
+        self.identityProviders = identityProviders
+        self.links = links
+    }
 
     public struct Field: Codable, Sendable, Equatable, Identifiable {
         public enum FieldType: String, Codable, Sendable, Equatable {
@@ -59,6 +80,46 @@ public struct AuthUISchema: Codable, Sendable, Equatable {
         public let id: MethodID
         public let label: String
         public let primary: Bool
+    }
+
+    /// A social / federated sign-in option. Selecting one runs the standard
+    /// browser authorization-code flow with `authorizationParameters` appended
+    /// to the authorize request, which tells the server to hand the user
+    /// straight to that provider instead of its own login page.
+    public struct IdentityProvider: Codable, Sendable, Equatable, Identifiable {
+        public let id: String
+        public let label: String
+        /// Server-hosted brand mark for light appearances, usually SVG.
+        /// `RxAuthSwiftUI` renders it with SwiftDraw; a plain `AsyncImage`
+        /// cannot decode SVG, so hosts drawing their own buttons need an SVG
+        /// renderer too.
+        public let iconUrl: String?
+        /// Variant for dark appearances. Falls back to `iconUrl` when absent.
+        public let darkIconUrl: String?
+        /// Extra query items to add to the authorize URL, e.g.
+        /// `["identity_provider": "google"]`.
+        public let authorizationParameters: [String: String]
+
+        public init(
+            id: String,
+            label: String,
+            iconUrl: String? = nil,
+            darkIconUrl: String? = nil,
+            authorizationParameters: [String: String]
+        ) {
+            self.id = id
+            self.label = label
+            self.iconUrl = iconUrl
+            self.darkIconUrl = darkIconUrl
+            self.authorizationParameters = authorizationParameters
+        }
+
+        /// The icon URL for the given appearance, resolved to a `URL`.
+        public func iconURL(dark: Bool) -> URL? {
+            let raw = (dark ? darkIconUrl : nil) ?? iconUrl
+            guard let raw, let url = URL(string: raw), url.scheme != nil else { return nil }
+            return url
+        }
     }
 
     public struct Link: Codable, Sendable, Equatable, Identifiable {
