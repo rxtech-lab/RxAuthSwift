@@ -86,7 +86,8 @@ public init(
 | Method | Description |
 | --- | --- |
 | `checkExistingAuth() async` | Restore a session from stored tokens on launch. |
-| `authenticate() async throws` | Browser authorization-code + PKCE flow. |
+| `authenticate(additionalAuthorizationParameters:) async throws` | Browser authorization-code + PKCE flow. Extra query items are appended to the authorize URL; core OAuth keys cannot be overridden. Defaults to none, so `authenticate()` still works. |
+| `authenticate(identityProvider:) async throws` | Social sign-in (Google, GitHub, …) via a schema-advertised `AuthUISchema.IdentityProvider`. Same browser flow with the provider's `authorizationParameters` attached. |
 | `authenticate(username:password:) async throws` | Native password grant. |
 | `authenticateWithPasskey(username:) async throws` | Passkey assertion sign-in. |
 | `signUp(username:password:name:) async throws -> SignupResult` | Native sign-up. |

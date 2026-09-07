@@ -181,3 +181,127 @@ struct OAuthErrorTests {
         #expect(OAuthError.cancelled.errorDescription != nil)
     }
 }
+
+// MARK: - Identity Provider Tests
+
+@Suite("Identity Providers")
+struct IdentityProviderTests {
+    private let providerJSON = #"""
+    {
+      "flow": "signin",
+      "title": "Sign in to RxLab",
+      "submitLabel": "Sign in",
+      "fields": [],
+      "supportedMethods": [
+        { "id": "password", "label": "Sign in with password", "primary": true }
+      ],
+      "identityProviders": [
+        {
+          "id": "github",
+          "label": "Continue with GitHub",
+          "iconUrl": "https://auth.rxlab.app/brand/github-invertocat-black.svg",
+          "darkIconUrl": "https://auth.rxlab.app/brand/github-invertocat-white.svg",
+          "authorizationParameters": { "identity_provider": "github" }
+        },
+        {
+          "id": "google",
+          "label": "Continue with Google",
+          "iconUrl": "https://auth.rxlab.app/brand/google-g.svg",
+          "darkIconUrl": "https://auth.rxlab.app/brand/google-g.svg",
+          "authorizationParameters": { "identity_provider": "google" }
+        }
+      ],
+      "links": []
+    }
+    """#
+
+    @Test func decodesIdentityProvidersFromSchema() throws {
+        let schema = try JSONDecoder().decode(AuthUISchema.self, from: Data(providerJSON.utf8))
+        let providers = try #require(schema.identityProviders)
+        #expect(providers.map(\.id) == ["github", "google"])
+        #expect(providers[0].iconURL(dark: false)?.absoluteString == "https://auth.rxlab.app/brand/github-invertocat-black.svg")
+        #expect(providers[0].iconURL(dark: true)?.absoluteString == "https://auth.rxlab.app/brand/github-invertocat-white.svg")
+        #expect(providers[0].authorizationParameters == ["identity_provider": "github"])
+        #expect(providers[1].label == "Continue with Google")
+    }
+
+    @Test func schemaWithoutIdentityProvidersStillDecodes() throws {
+        let json = #"""
+        {
+          "flow": "signup",
+          "title": "Create account",
+          "submitLabel": "Create",
+          "fields": [],
+          "supportedMethods": []
+        }
+        """#
+        let schema = try JSONDecoder().decode(AuthUISchema.self, from: Data(json.utf8))
+        #expect(schema.identityProviders == nil)
+    }
+
+    @Test func iconURLFallsBackAndRejectsRelativePaths() {
+        let noDark = AuthUISchema.IdentityProvider(
+            id: "okta",
+            label: "Continue with Okta",
+            iconUrl: "https://auth.example.com/okta.svg",
+            authorizationParameters: ["identity_provider": "okta"]
+        )
+        #expect(noDark.iconURL(dark: true)?.absoluteString == "https://auth.example.com/okta.svg")
+
+        let relative = AuthUISchema.IdentityProvider(
+            id: "okta",
+            label: "Continue with Okta",
+            iconUrl: "/brand/okta.svg",
+            authorizationParameters: [:]
+        )
+        #expect(relative.iconURL(dark: false) == nil)
+
+        let none = AuthUISchema.IdentityProvider(
+            id: "okta",
+            label: "Continue with Okta",
+            authorizationParameters: [:]
+        )
+        #expect(none.iconURL(dark: false) == nil)
+    }
+
+    @Test @MainActor func authorizationURLCarriesProviderParameters() throws {
+        let manager = OAuthManager(
+            configuration: RxAuthConfiguration(
+                issuer: "https://auth.example.com",
+                clientID: "client-1",
+                redirectURI: "myapp://callback"
+            ),
+            tokenStorage: InMemoryTokenStorage()
+        )
+        let url = try #require(
+            manager.buildAuthorizationURL(
+                codeChallenge: "challenge",
+                additionalParameters: ["identity_provider": "google"]
+            )
+        )
+        let items = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        #expect(items.first(where: { $0.name == "identity_provider" })?.value == "google")
+        #expect(items.first(where: { $0.name == "client_id" })?.value == "client-1")
+        #expect(items.first(where: { $0.name == "code_challenge" })?.value == "challenge")
+    }
+
+    @Test @MainActor func additionalParametersCannotOverrideCoreOAuthParameters() throws {
+        let manager = OAuthManager(
+            configuration: RxAuthConfiguration(
+                issuer: "https://auth.example.com",
+                clientID: "client-1",
+                redirectURI: "myapp://callback"
+            ),
+            tokenStorage: InMemoryTokenStorage()
+        )
+        let url = try #require(
+            manager.buildAuthorizationURL(
+                codeChallenge: "challenge",
+                additionalParameters: ["client_id": "evil", "redirect_uri": "evil://x"]
+            )
+        )
+        let items = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        #expect(items.filter { $0.name == "client_id" }.map(\.value) == ["client-1"])
+        #expect(items.filter { $0.name == "redirect_uri" }.map(\.value) == ["myapp://callback"])
+    }
+}

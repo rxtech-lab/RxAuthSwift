@@ -21,6 +21,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
+        .package(url: "https://github.com/swhitty/SwiftDraw.git", from: "0.29.0"),
     ],
     targets: [
         .target(
@@ -31,7 +32,10 @@ let package = Package(
         ),
         .target(
             name: "RxAuthSwiftUI",
-            dependencies: ["RxAuthSwift"]
+            dependencies: [
+                "RxAuthSwift",
+                .product(name: "SwiftDraw", package: "SwiftDraw"),
+            ]
         ),
         .testTarget(
             name: "RxAuthSwiftTests",
