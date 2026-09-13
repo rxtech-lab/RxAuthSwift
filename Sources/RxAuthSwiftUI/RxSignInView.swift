@@ -767,6 +767,9 @@ public struct RxSignInView<Header: View>: View {
         }
         .font(.system(size: 15))
         .animation(.easeInOut(duration: 0.2), value: mode)
+        #if os(macOS)
+        .padding(.bottom, 16)
+        #endif
     }
 
     private var orDivider: some View {
