@@ -20,6 +20,12 @@ public struct RxAuthConfiguration: Sendable {
     public let passkeyAccountCreationOptionsPath: String?
     public let passkeyAccountCreationVerifyPath: String?
     public let passkeyRelyingPartyIdentifier: String?
+    /// Native Sign in with Apple, step 1: asks the server for a single-use
+    /// nonce. Set to nil to force Apple through the browser flow instead.
+    public let appleNoncePath: String?
+    /// Native Sign in with Apple, step 2: trades the identity token from
+    /// `ASAuthorizationAppleIDProvider` for our own OAuth tokens.
+    public let appleNativeSignInPath: String?
     public let uiSchemaPath: String?
 
     public let keychainServiceName: String
@@ -43,6 +49,8 @@ public struct RxAuthConfiguration: Sendable {
         passkeyAccountCreationOptionsPath: String? = nil,
         passkeyAccountCreationVerifyPath: String? = nil,
         passkeyRelyingPartyIdentifier: String? = nil,
+        appleNoncePath: String? = "/api/oauth/social/apple/nonce",
+        appleNativeSignInPath: String? = "/api/oauth/social/apple",
         uiSchemaPath: String? = "/api/auth/ui-schema",
         keychainServiceName: String = "com.rxlab.RxAuthSwift"
     ) {
@@ -64,6 +72,8 @@ public struct RxAuthConfiguration: Sendable {
         self.passkeyAccountCreationOptionsPath = passkeyAccountCreationOptionsPath
         self.passkeyAccountCreationVerifyPath = passkeyAccountCreationVerifyPath
         self.passkeyRelyingPartyIdentifier = passkeyRelyingPartyIdentifier
+        self.appleNoncePath = appleNoncePath
+        self.appleNativeSignInPath = appleNativeSignInPath
         self.uiSchemaPath = uiSchemaPath
         self.keychainServiceName = keychainServiceName
     }
@@ -127,6 +137,16 @@ public struct RxAuthConfiguration: Sendable {
     public var passkeyAccountCreationVerifyURL: URL? {
         guard let passkeyAccountCreationVerifyPath else { return nil }
         return URL(string: issuer + passkeyAccountCreationVerifyPath)
+    }
+
+    public var appleNonceURL: URL? {
+        guard let appleNoncePath else { return nil }
+        return URL(string: issuer + appleNoncePath)
+    }
+
+    public var appleNativeSignInURL: URL? {
+        guard let appleNativeSignInPath else { return nil }
+        return URL(string: issuer + appleNativeSignInPath)
     }
 
     public var redirectScheme: String? {

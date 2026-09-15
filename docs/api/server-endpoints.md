@@ -104,6 +104,40 @@ Bearer-authenticated with the current access token.
   "contact_identifier_type", "name"?, "credential": { … } }`. Returns token
   JSON.
 
+## Native Sign in with Apple
+
+Two calls, mirroring the passkey options/verify shape. Only reachable when the
+server has Apple configured — an unconfigured deployment omits `apple` from the
+UI schema's `identityProviders`, so the client never draws the button and never
+calls these.
+
+- `POST {appleNoncePath}` (default `/api/oauth/social/apple/nonce`),
+  `application/json`: `{ "client_id", "redirect_uri" }` →
+  `{ "session_id", "nonce" }`. The nonce is single-use and expires in 5 minutes.
+- The client passes **SHA-256(nonce), hex-encoded** as
+  `ASAuthorizationAppleIDRequest.nonce`; Apple copies it into the identity
+  token's `nonce` claim.
+- `POST {appleNativeSignInPath}` (default `/api/oauth/social/apple`),
+  `application/json`:
+  `{ "client_id", "session_id", "nonce", "identity_token",
+  "full_name": { "given_name"?, "family_name"? }?, "scope"? }`.
+  Returns token JSON.
+
+The server verifies the identity token's signature against Apple's JWKS, pins
+`iss` to `https://appleid.apple.com` and `aud` to one of `APPLE_OAUTH_BUNDLE_IDS`
+(native tokens are audienced to the app's bundle ID, not the web Services ID),
+re-hashes the raw nonce to confirm the token was minted for this request, and
+then burns the nonce.
+
+`full_name` is Apple's first-authorization-only payload. Apple releases the
+user's name to the app exactly **once**, on the very first consent, and never
+again — so send it on that call or the display name is lost permanently.
+
+Error responses use the usual OAuth shape: `invalid_grant` for a token that
+fails verification or a stale/mismatched nonce, `access_denied` (403) when
+sign-up is disabled or the address isn't whitelisted, `409` when the Apple
+account is already linked elsewhere.
+
 ## Server-driven UI schema
 
 `GET {uiSchemaPath}/{flow}?client_id={clientID}` (default
