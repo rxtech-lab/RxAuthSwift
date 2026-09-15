@@ -30,6 +30,8 @@ Public symbols in the `RxAuthSwift` target.
 | `passkeyUpgradeChallengePath` / `passkeyUpgradeVerificationPath` | `String?` | `nil` | Passkey upgrade pair. |
 | `passkeyAccountCreationOptionsPath` / `passkeyAccountCreationVerifyPath` | `String?` | `nil` | System-sheet account-creation pair. |
 | `passkeyRelyingPartyIdentifier` | `String?` | `nil` | WebAuthn RP ID (falls back to issuer host). |
+| `appleNoncePath` | `String?` | `/api/oauth/social/apple/nonce` | Native Sign in with Apple, step 1. Set to `nil` to force Apple through the browser flow. |
+| `appleNativeSignInPath` | `String?` | `/api/oauth/social/apple` | Native Sign in with Apple, step 2. |
 | `uiSchemaPath` | `String?` | `/api/auth/ui-schema` | Server-driven UI schema endpoint. |
 | `keychainServiceName` | `String` | `com.rxlab.RxAuthSwift` | Keychain service scope. |
 
@@ -40,8 +42,8 @@ Derived `URL?` accessors: `authorizeURL`, `tokenURL`, `userInfoURL`,
 `passkeyVerificationURL`, `passkeyRegistrationChallengeURL`,
 `passkeyRegistrationVerificationURL`, `passkeyUpgradeChallengeURL`,
 `passkeyUpgradeVerificationURL`, `passkeyAccountCreationOptionsURL`,
-`passkeyAccountCreationVerifyURL`, and `redirectScheme`. Optional endpoints
-resolve to `nil` when their path is unset.
+`passkeyAccountCreationVerifyURL`, `appleNonceURL`, `appleNativeSignInURL`, and
+`redirectScheme`. Optional endpoints resolve to `nil` when their path is unset.
 
 - `func uiSchemaURL(flow: AuthUISchema.Flow) -> URL?` — builds the schema URL
   for a flow, appending `client_id`.
@@ -68,8 +70,13 @@ state and drives every flow.
 
 `supportsPasskeyAuthentication`, `supportsNativeSignup`,
 `supportsPasskeyRegistration`, `supportsPasskeyUpgrade`,
-`supportsPasskeyAccountCreation` — each `true` only when the matching
-endpoints are configured.
+`supportsPasskeyAccountCreation`, `supportsNativeAppleSignIn` — each `true` only
+when the matching endpoints are configured.
+
+`supportsNativeAppleSignIn` says only *how* Apple is performed (native sheet vs.
+browser), never *whether* it is offered. Whether an Apple button appears at all
+is the server's call: it comes from the UI schema's `identityProviders`, which
+omits `apple` entirely when the deployment has no Apple credentials.
 
 ### Initializer
 
@@ -87,7 +94,8 @@ public init(
 | --- | --- |
 | `checkExistingAuth() async` | Restore a session from stored tokens on launch. |
 | `authenticate(additionalAuthorizationParameters:) async throws` | Browser authorization-code + PKCE flow. Extra query items are appended to the authorize URL; core OAuth keys cannot be overridden. Defaults to none, so `authenticate()` still works. |
-| `authenticate(identityProvider:) async throws` | Social sign-in (Google, GitHub, …) via a schema-advertised `AuthUISchema.IdentityProvider`. Same browser flow with the provider's `authorizationParameters` attached. |
+| `authenticate(identityProvider:) async throws` | Social sign-in via a schema-advertised `AuthUISchema.IdentityProvider`. Google, GitHub and friends run the browser flow with the provider's `authorizationParameters` attached; `apple` takes the native path instead when `supportsNativeAppleSignIn`. Callers use one call for every provider. |
+| `authenticateWithApple() async throws` | Native Sign in with Apple directly, for hosts drawing their own Apple button. |
 | `authenticate(username:password:) async throws` | Native password grant. |
 | `authenticateWithPasskey(username:) async throws` | Passkey assertion sign-in. |
 | `signUp(username:password:name:) async throws -> SignupResult` | Native sign-up. |
@@ -154,7 +162,7 @@ Built-in implementations: `KeychainTokenStorage` (default, scoped to
 `tokenExchangeFailed(String)`, `tokenRefreshFailed(String)`,
 `networkError(String)`, `userInfoFailed(String)`, `noRefreshToken`,
 `invalidCallbackURL`, `cancelled`, `invalidCredentials`,
-`invalidSignupDetails`, `passkeyUnavailable`.
+`invalidSignupDetails`, `passkeyUnavailable`, `appleSignInUnavailable`.
 
 `KeychainError: LocalizedError, Sendable` cases: `saveFailed(OSStatus)`,
 `deleteFailed(OSStatus)`, `unexpectedData`.

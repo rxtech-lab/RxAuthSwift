@@ -10,8 +10,10 @@ import UIKit
 
 /// Resolves the platform presentation anchor for an `ASAuthorizationController`.
 /// macOS uses the key/main window; iOS uses the foreground window scene's window.
+/// Internal rather than file-private so the Sign in with Apple controller in
+/// `AppleSignInAuthenticator.swift` anchors its sheet the same way.
 @MainActor
-private func resolvePresentationAnchor() -> ASPresentationAnchor {
+func resolvePresentationAnchor() -> ASPresentationAnchor {
     #if os(macOS)
     return NSApplication.shared.keyWindow
         ?? NSApplication.shared.mainWindow

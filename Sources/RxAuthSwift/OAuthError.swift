@@ -14,6 +14,7 @@ public enum OAuthError: LocalizedError, Sendable {
     case invalidCredentials
     case invalidSignupDetails
     case passkeyUnavailable
+    case appleSignInUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -43,6 +44,8 @@ public enum OAuthError: LocalizedError, Sendable {
             return "Enter a username and password to create an account"
         case .passkeyUnavailable:
             return "Passkey sign in is not configured for this app"
+        case .appleSignInUnavailable:
+            return "Sign in with Apple is not configured for this app"
         }
     }
 }

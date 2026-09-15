@@ -87,6 +87,11 @@ public struct AuthUISchema: Codable, Sendable, Equatable {
     /// to the authorize request, which tells the server to hand the user
     /// straight to that provider instead of its own login page.
     public struct IdentityProvider: Codable, Sendable, Equatable, Identifiable {
+        /// The one provider id that takes a native path instead of the browser
+        /// flow. `OAuthManager` checks for it so callers can treat every entry
+        /// in `identityProviders` the same way.
+        public static let appleProviderID = "apple"
+
         public let id: String
         public let label: String
         /// Server-hosted brand mark for light appearances, usually SVG.

@@ -47,6 +47,19 @@ public final class OAuthManager: Sendable {
     public var supportsPasskeyAccountCreation: Bool {
         configuration.passkeyAccountCreationOptionsURL != nil && configuration.passkeyAccountCreationVerifyURL != nil
     }
+    /// Whether an `apple` entry in the UI schema is taken natively (the system
+    /// Sign in with Apple sheet) rather than through the browser flow.
+    ///
+    /// This says nothing about whether the server *offers* Apple — that is the
+    /// schema's job, and a server with Apple unconfigured simply omits it from
+    /// `identityProviders`, so no button is drawn at all.
+    public var supportsNativeAppleSignIn: Bool {
+        #if os(macOS) || os(iOS)
+        return configuration.appleNonceURL != nil && configuration.appleNativeSignInURL != nil
+        #else
+        return false
+        #endif
+    }
 
     private let configuration: RxAuthConfiguration
     private let tokenStorage: TokenStorageProtocol
@@ -138,12 +151,50 @@ public final class OAuthManager: Sendable {
     }
 
     /// Sign in through a third-party identity provider advertised by the
-    /// server's UI schema (Google, GitHub, …). Runs the same browser flow as
-    /// `authenticate()`, with the provider's `authorizationParameters` attached
-    /// so the server skips its own login page and hands off to the provider.
+    /// server's UI schema (Google, GitHub, Apple, …). Runs the same browser flow
+    /// as `authenticate()`, with the provider's `authorizationParameters`
+    /// attached so the server skips its own login page and hands off to the
+    /// provider.
+    ///
+    /// Apple is the exception: on iOS and macOS it takes the native
+    /// `ASAuthorizationAppleIDProvider` path instead, so the user gets the
+    /// system sheet rather than a web view. Callers don't have to know that —
+    /// the same call works for every provider the schema lists, and the button
+    /// itself is drawn from the server-supplied label and icon either way.
     public func authenticate(identityProvider: AuthUISchema.IdentityProvider) async throws {
         logger.info("Starting identity provider sign-in: \(identityProvider.id)")
+
+        if identityProvider.id == AuthUISchema.IdentityProvider.appleProviderID,
+           supportsNativeAppleSignIn {
+            try await authenticateWithApple()
+            return
+        }
+
         try await authenticate(additionalAuthorizationParameters: identityProvider.authorizationParameters)
+    }
+
+    /// Native Sign in with Apple.
+    ///
+    /// Normally reached through `authenticate(identityProvider:)` when the
+    /// server advertises `apple`; exposed directly for hosts that draw their own
+    /// Apple button.
+    public func authenticateWithApple() async throws {
+        isAuthenticating = true
+        errorMessage = nil
+        defer { isAuthenticating = false }
+
+        do {
+            try await exchangeAppleIdentityTokenForTokens()
+            logger.info("Native Sign in with Apple completed successfully")
+        } catch {
+            // A user dismissing the system sheet is a normal outcome, not a
+            // failure worth showing in the error banner.
+            if case OAuthError.cancelled = error {
+                throw error
+            }
+            errorMessage = error.localizedDescription
+            throw error
+        }
     }
 
     public func authenticate(username: String, password: String) async throws {
@@ -515,6 +566,72 @@ public final class OAuthManager: Sendable {
         startTokenRefreshTimer()
         #else
         throw OAuthError.passkeyUnavailable
+        #endif
+    }
+
+    /// The native Apple ceremony, end to end.
+    ///
+    /// 1. Ask the server for a single-use nonce.
+    /// 2. Run the system sheet, passing SHA-256(nonce) so Apple stamps it into
+    ///    the identity token.
+    /// 3. Post the token back with the raw nonce; the server verifies the
+    ///    signature against Apple's public keys, re-hashes the nonce to confirm
+    ///    the token was minted for this request, and returns OAuth tokens.
+    ///
+    /// The name is forwarded on this first call because Apple releases it only
+    /// once — on the very first authorization — and never again.
+    private func exchangeAppleIdentityTokenForTokens() async throws {
+        #if os(macOS) || os(iOS)
+        guard supportsNativeAppleSignIn,
+              let nonceURL = configuration.appleNonceURL,
+              let signInURL = configuration.appleNativeSignInURL
+        else {
+            throw OAuthError.appleSignInUnavailable
+        }
+
+        var nonceRequest = URLRequest(url: nonceURL)
+        nonceRequest.httpMethod = "POST"
+        nonceRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        nonceRequest.httpBody = try JSONEncoder().encode(AppleNonceRequest(
+            clientID: configuration.clientID,
+            redirectURI: configuration.redirectURI
+        ))
+
+        let (nonceData, nonceResponse) = try await URLSession.shared.data(for: nonceRequest)
+        guard let httpNonceResponse = nonceResponse as? HTTPURLResponse,
+              httpNonceResponse.statusCode == 200
+        else {
+            throw OAuthError.authenticationFailed("Apple sign-in challenge request failed")
+        }
+        let challenge = try JSONDecoder().decode(AppleNonceResponse.self, from: nonceData)
+
+        let credential = try await PlatformAppleSignInAuthenticator().signIn(
+            hashedNonce: PlatformAppleSignInAuthenticator.sha256Hex(challenge.nonce)
+        )
+
+        var signInRequest = URLRequest(url: signInURL)
+        signInRequest.httpMethod = "POST"
+        signInRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        signInRequest.httpBody = try JSONEncoder().encode(AppleNativeSignInRequest(
+            clientID: configuration.clientID,
+            sessionID: challenge.sessionID,
+            nonce: challenge.nonce,
+            identityToken: credential.identityToken,
+            fullName: AppleNativeSignInRequest.FullName(
+                givenName: credential.givenName,
+                familyName: credential.familyName
+            ),
+            scope: configuration.scopes.joined(separator: " ")
+        ))
+
+        let tokenResponse = try await sendTokenRequest(signInRequest)
+        try saveTokens(tokenResponse)
+        try await fetchUserInfo()
+
+        authState = .authenticated
+        startTokenRefreshTimer()
+        #else
+        throw OAuthError.appleSignInUnavailable
         #endif
     }
 
@@ -1128,6 +1245,56 @@ private struct PasskeyChallengeRequest: Encodable {
         case clientID = "client_id"
         case redirectURI = "redirect_uri"
         case username
+    }
+}
+
+private struct AppleNonceRequest: Encodable {
+    let clientID: String
+    let redirectURI: String
+
+    enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case redirectURI = "redirect_uri"
+    }
+}
+
+private struct AppleNonceResponse: Decodable {
+    let sessionID: String
+    let nonce: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case nonce
+    }
+}
+
+private struct AppleNativeSignInRequest: Encodable {
+    let clientID: String
+    let sessionID: String
+    let nonce: String
+    let identityToken: String
+    let fullName: FullName
+    let scope: String
+
+    enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case sessionID = "session_id"
+        case nonce
+        case identityToken = "identity_token"
+        case fullName = "full_name"
+        case scope
+    }
+
+    /// Apple splits the name and only ever sends it on the first
+    /// authorization; both halves are absent on every later sign-in.
+    struct FullName: Encodable {
+        let givenName: String?
+        let familyName: String?
+
+        enum CodingKeys: String, CodingKey {
+            case givenName = "given_name"
+            case familyName = "family_name"
+        }
     }
 }
 

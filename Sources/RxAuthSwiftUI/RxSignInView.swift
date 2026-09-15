@@ -898,9 +898,15 @@ public struct RxSignInView<Header: View>: View {
         }
     }
 
-    /// Social sign-in never needs typed input: the browser session carries the
-    /// user to the provider and back with an authorization code, and the
-    /// server creates the account on first use, so it works from either mode.
+    /// Social sign-in never needs typed input, so every provider in the schema
+    /// gets the same button and the same call: the server creates the account
+    /// on first use, which means this works from either mode.
+    ///
+    /// How the credential is actually obtained is `OAuthManager`'s business —
+    /// most providers go out to the browser and come back with an authorization
+    /// code, while Apple runs the system sheet natively. The button is drawn
+    /// from the server's label and icon in both cases, so a provider the server
+    /// enables tomorrow needs no change here.
     private func signIn(with provider: AuthUISchema.IdentityProvider) {
         focusedField = nil
         activeIdentityProvider = provider.id
