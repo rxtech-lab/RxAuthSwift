@@ -64,15 +64,20 @@ public final class OAuthManager: Sendable {
     private let configuration: RxAuthConfiguration
     private let tokenStorage: TokenStorageProtocol
     private let logger: Logger
+    /// Records the scopes each interactive sign-in requested (see
+    /// `sessionMissingScopes`).
+    private let scopeDefaults: UserDefaults
 
     private var refreshTimer: Timer?
 
     public init(
         configuration: RxAuthConfiguration,
         tokenStorage: TokenStorageProtocol? = nil,
-        logger: Logger? = nil
+        logger: Logger? = nil,
+        scopeDefaults: UserDefaults = .standard
     ) {
         self.configuration = configuration
+        self.scopeDefaults = scopeDefaults
         self.tokenStorage = tokenStorage ?? KeychainTokenStorage(serviceName: configuration.keychainServiceName)
 
         var defaultLogger = logger ?? Logger(label: "com.rxlab.RxAuthSwift")
@@ -85,6 +90,14 @@ public final class OAuthManager: Sendable {
     // MARK: - Public API
 
     public func checkExistingAuth() async {
+        // A session signed in before `configuration.scopes` grew can never gain
+        // the new scopes by refreshing, so require a fresh sign-in instead.
+        if let accessToken = tokenStorage.getAccessToken(),
+           let missing = sessionMissingScopes(granted: Self.grantedScopes(inAccessToken: accessToken)) {
+            logger.notice("Stored session is missing scopes \(missing.sorted().joined(separator: " ")); signing out")
+            await logout()
+            return
+        }
         if let _ = tokenStorage.getAccessToken(), !tokenStorage.isTokenExpired() {
             do {
                 try await fetchUserInfo()
@@ -376,11 +389,67 @@ public final class OAuthManager: Sendable {
         }
 
         let tokenResponse = try JSONDecoder().decode(TokenResponse.self, from: data)
-        try saveTokens(tokenResponse)
+        // A refresh keeps the refresh token's original scopes. If the app now
+        // requests more, the session can't be upgraded in place: sign out so
+        // the next interactive sign-in grants the full set.
+        if let missing = sessionMissingScopes(granted: Self.grantedScopes(in: tokenResponse)) {
+            logger.notice("Refreshed session is missing scopes \(missing.sorted().joined(separator: " ")); signing out")
+            await handleTokenRefreshFailure()
+            throw OAuthError.tokenRefreshFailed(
+                "The session is missing scopes \(missing.sorted().joined(separator: " ")). Sign in again."
+            )
+        }
+        try saveTokens(tokenResponse, fromRefresh: true)
         try await fetchUserInfo()
 
         authState = .authenticated
         logger.info("Token refreshed successfully")
+    }
+
+    // MARK: - Scopes
+
+    private var signedInScopesKey: String {
+        "RxAuthSwift.signedInScopes.\(configuration.clientID).\(configuration.keychainServiceName)"
+    }
+
+    /// Configured scopes the current session can't have, or nil when it is
+    /// up to date. Compares against the scopes the last interactive sign-in
+    /// requested, so a server that grants fewer scopes than requested can't
+    /// cause a sign-out loop. Sessions signed in before that was recorded fall
+    /// back to the token's granted scopes; unknown grants (opaque tokens
+    /// without a `scope` field) are treated as up to date.
+    func sessionMissingScopes(granted: Set<String>?) -> Set<String>? {
+        let baseline: Set<String>
+        if let recorded = scopeDefaults.stringArray(forKey: signedInScopesKey) {
+            baseline = Set(recorded)
+        } else if let granted {
+            baseline = granted
+        } else {
+            return nil
+        }
+        let missing = Set(configuration.scopes).subtracting(baseline)
+        return missing.isEmpty ? nil : missing
+    }
+
+    /// Scopes of a token response: its `scope` field, else the access
+    /// token's `scope` claim.
+    nonisolated static func grantedScopes(in response: TokenResponse) -> Set<String>? {
+        if let scope = response.scope {
+            return Set(scope.split(separator: " ").map(String.init))
+        }
+        return grantedScopes(inAccessToken: response.accessToken)
+    }
+
+    /// The `scope` claim of a JWT access token, or nil for opaque tokens and
+    /// tokens without one.
+    nonisolated static func grantedScopes(inAccessToken token: String) -> Set<String>? {
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              let data = Base64URL.decode(String(parts[1])),
+              let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let scope = claims["scope"] as? String
+        else { return nil }
+        return Set(scope.split(separator: " ").map(String.init))
     }
 
     // MARK: - Private
@@ -1038,8 +1107,11 @@ public final class OAuthManager: Sendable {
         currentUser = try JSONDecoder().decode(User.self, from: data)
     }
 
-    private func saveTokens(_ tokenResponse: TokenResponse) throws {
+    private func saveTokens(_ tokenResponse: TokenResponse, fromRefresh: Bool = false) throws {
         try tokenStorage.saveAccessToken(tokenResponse.accessToken)
+        if !fromRefresh {
+            scopeDefaults.set(configuration.scopes, forKey: signedInScopesKey)
+        }
 
         if let refreshToken = tokenResponse.refreshToken {
             try tokenStorage.saveRefreshToken(refreshToken)
@@ -1222,17 +1294,20 @@ private struct SignupPendingVerificationResponse: Decodable {
     }
 }
 
-private struct TokenResponse: Decodable {
+struct TokenResponse: Decodable {
     let accessToken: String
     let refreshToken: String?
     let expiresIn: Int?
     let tokenType: String?
+    /// Space-separated granted scopes (RFC 6749 §5.1), when the server sends them.
+    let scope: String?
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
         case expiresIn = "expires_in"
         case tokenType = "token_type"
+        case scope
     }
 }
 
