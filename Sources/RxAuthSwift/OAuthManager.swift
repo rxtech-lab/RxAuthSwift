@@ -69,6 +69,7 @@ public final class OAuthManager: Sendable {
     private let scopeDefaults: UserDefaults
 
     private var refreshTimer: Timer?
+    private var tokenRefreshTask: Task<Void, Error>?
 
     public init(
         configuration: RxAuthConfiguration,
@@ -357,7 +358,22 @@ public final class OAuthManager: Sendable {
         logger.info("User logged out")
     }
 
+    /// Reuses a valid access token and shares any refresh already in progress.
     public func refreshTokenIfNeeded() async throws {
+        if let tokenRefreshTask {
+            try await tokenRefreshTask.value
+            return
+        }
+        if tokenStorage.getAccessToken() != nil, !tokenStorage.isTokenExpired() {
+            return
+        }
+        let task = Task { try await self.refreshToken() }
+        tokenRefreshTask = task
+        defer { tokenRefreshTask = nil }
+        try await task.value
+    }
+
+    private func refreshToken() async throws {
         guard let refreshToken = tokenStorage.getRefreshToken() else {
             throw OAuthError.noRefreshToken
         }
