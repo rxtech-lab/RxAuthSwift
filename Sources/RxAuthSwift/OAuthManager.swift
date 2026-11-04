@@ -471,7 +471,7 @@ public final class OAuthManager: Sendable {
     // MARK: - Private
 
     private func platformAuthenticate(url: URL, callbackScheme: String) async throws -> URL {
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         let provider = IOSWebAuthSession()
         return try await provider.authenticate(url: url, callbackURLScheme: callbackScheme)
         #elseif os(macOS)

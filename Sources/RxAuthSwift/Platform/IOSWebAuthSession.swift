@@ -1,4 +1,4 @@
-#if canImport(AuthenticationServices) && os(iOS)
+#if canImport(AuthenticationServices) && (os(iOS) || os(visionOS))
 import AuthenticationServices
 
 @MainActor

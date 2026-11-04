@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "RxAuthSwift",
     platforms: [
-        .iOS(.v26),
+        .iOS(.v26), .visionOS(.v26),
         .macOS(.v26),
     ],
     products: [

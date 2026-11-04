@@ -41,12 +41,16 @@ struct AuthMethodButton: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: Metrics.height)
+            #if os(visionOS)
+            .background(.regularMaterial, in: .rect(cornerRadius: Metrics.corner))
+            #else
             .glassEffect(
                 isProminent
                     ? .regular.tint(accentColor).interactive()
                     : .regular.interactive(),
                 in: .rect(cornerRadius: Metrics.corner)
             )
+            #endif
             // Plain glass all but disappears over a dark background; a hairline
             // gives the alternatives an edge without making them compete.
             .overlay {
@@ -62,7 +66,9 @@ struct AuthMethodButton: View {
             )
         }
         .buttonStyle(.pressScale)
+        #if !os(visionOS)
         .glassEffectID("method-\(method.id.rawValue)\(glassIDSuffix)", in: namespace)
+        #endif
         .disabled(isBusy)
         .opacity(isBusy && !isRunning ? 0.45 : 1)
         .animation(.easeInOut(duration: 0.2), value: isBusy)

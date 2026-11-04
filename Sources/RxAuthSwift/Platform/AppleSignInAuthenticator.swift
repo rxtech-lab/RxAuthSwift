@@ -1,4 +1,4 @@
-#if canImport(AuthenticationServices) && (os(macOS) || os(iOS))
+#if canImport(AuthenticationServices) && (os(macOS) || os(iOS) || os(visionOS))
 import AuthenticationServices
 import CryptoKit
 import Foundation

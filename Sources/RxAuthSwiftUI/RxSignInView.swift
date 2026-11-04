@@ -87,9 +87,9 @@ public struct RxSignInView<Header: View>: View {
         #endif
     }
 
-    // MARK: - Web Flow (iOS)
+    // MARK: - Web Flow (iOS and visionOS)
 
-    #if os(iOS)
+    #if os(iOS) || os(visionOS)
     private var webContent: some View {
         VStack(spacing: 32) {
             Spacer()
@@ -166,7 +166,7 @@ public struct RxSignInView<Header: View>: View {
                     // pinned to the bottom of the screen.
                     Spacer(minLength: Layout.topInset)
 
-                    GlassEffectContainer(spacing: 20) {
+                    AuthGlassContainer(spacing: 20) {
                         VStack(spacing: Layout.cardSpacing) {
                             Group {
                                 if let customHeader {
@@ -324,8 +324,14 @@ public struct RxSignInView<Header: View>: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: 400)
+        #if os(visionOS)
+        .background(.regularMaterial, in: .rect(cornerRadius: 12))
+        #else
         .glassEffect(.regular.tint(appearance.accentColor.opacity(0.3)), in: .rect(cornerRadius: 12))
+        #endif
+        #if !os(visionOS)
         .glassEffectID("info", in: glassNamespace)
+        #endif
         .padding(.top, 16)
         .padding(.horizontal, 32)
     }
@@ -360,8 +366,14 @@ public struct RxSignInView<Header: View>: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: 400)
+        #if os(visionOS)
+        .background(.regularMaterial, in: .rect(cornerRadius: 12))
+        #else
         .glassEffect(.regular.tint(.red.opacity(0.3)), in: .rect(cornerRadius: 12))
+        #endif
+        #if !os(visionOS)
         .glassEffectID("error", in: glassNamespace)
+        #endif
         .padding(.top, 16)
         .padding(.horizontal, 32)
     }
@@ -392,7 +404,9 @@ public struct RxSignInView<Header: View>: View {
     private var compactHeader: some View {
         VStack(spacing: 20) {
             compactIcon
+                #if !os(visionOS)
                 .glassEffectID("header-icon", in: glassNamespace)
+                #endif
 
             VStack(spacing: 7) {
                 headerTitle
@@ -493,11 +507,13 @@ public struct RxSignInView<Header: View>: View {
         let hasAlternatives = !alternativeMethods.isEmpty || !identityProviders.isEmpty
 
         return VStack(spacing: 0) {
-            GlassEffectContainer(spacing: 16) {
+            AuthGlassContainer(spacing: 16) {
                 VStack(spacing: 10) {
                     ForEach(prominentMethods) { method in
                         methodButton(method, schema: schema)
+                            #if !os(visionOS)
                             .glassEffectTransition(.materialize)
+                            #endif
                     }
 
                     if hasAlternatives {
@@ -508,12 +524,16 @@ public struct RxSignInView<Header: View>: View {
 
                         ForEach(alternativeMethods) { method in
                             methodButton(method, schema: schema)
+                                #if !os(visionOS)
                                 .glassEffectTransition(.materialize)
+                                #endif
                         }
 
                         ForEach(identityProviders) { provider in
                             identityProviderButton(provider)
+                                #if !os(visionOS)
                                 .glassEffectTransition(.materialize)
+                                #endif
                         }
                     }
                 }
@@ -533,7 +553,7 @@ public struct RxSignInView<Header: View>: View {
             backToMethodsButton
                 .padding(.bottom, 18)
 
-            GlassEffectContainer(spacing: 12) {
+            AuthGlassContainer(spacing: 12) {
                 VStack(spacing: 10) {
                     ForEach(Array(fields.enumerated()), id: \.element.id) { index, field in
                         renderField(field, isLast: index == fields.count - 1)
