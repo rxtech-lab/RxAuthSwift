@@ -252,3 +252,7 @@ bash scripts/build-ios.sh
 ## License
 
 MIT
+
+## visionOS
+
+The shared SDK supports visionOS 26. SwiftUI components use material backgrounds on visionOS while retaining Liquid Glass on iOS/macOS. Unsupported keyboard-dismiss behavior is excluded on visionOS. Validate spatial interaction and presentation on a headset before shipping.

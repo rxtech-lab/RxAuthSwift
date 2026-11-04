@@ -84,8 +84,14 @@ struct AuthCredentialField: View {
         }
         .padding(.horizontal, 18)
         .frame(height: Metrics.rowHeight)
+        #if os(visionOS)
+        .background(.regularMaterial, in: .rect(cornerRadius: Metrics.corner))
+        #else
         .glassEffect(glass, in: .rect(cornerRadius: Metrics.corner))
+        #endif
+        #if !os(visionOS)
         .glassEffectID("field-\(field.key)", in: namespace)
+        #endif
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
                 .strokeBorder(borderTint, lineWidth: 1)
@@ -113,7 +119,7 @@ struct AuthCredentialField: View {
         .onSubmit(onSubmit)
         .autocorrectionDisabled(true)
         .textContentType(contentType)
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         .textInputAutocapitalization(autocapitalization)
         .keyboardType(keyboardType)
         #endif
@@ -160,6 +166,7 @@ struct AuthCredentialField: View {
 
     /// Focus should read as a quiet lift, not a colored block — the tint stays
     /// low and the accent shows up in the hairline and the icon instead.
+    #if !os(visionOS)
     private var glass: Glass {
         if hasError {
             return .regular.tint(.red.opacity(0.10)).interactive()
@@ -169,6 +176,8 @@ struct AuthCredentialField: View {
         }
         return .regular.interactive()
     }
+
+    #endif
 
     private var borderTint: Color {
         if hasError { return .red.opacity(0.5) }
@@ -194,7 +203,7 @@ struct AuthCredentialField: View {
     }
 
     private enum Metrics {
-        #if os(iOS)
+        #if os(iOS) || os(visionOS)
         static let rowHeight: CGFloat = 58
         #else
         static let rowHeight: CGFloat = 52
@@ -208,7 +217,7 @@ struct AuthCredentialField: View {
 
     // MARK: - AutoFill
 
-    #if os(iOS)
+    #if os(iOS) || os(visionOS)
     private var contentType: UITextContentType? {
         switch field.autocomplete ?? "" {
         case "email", "username": return .username

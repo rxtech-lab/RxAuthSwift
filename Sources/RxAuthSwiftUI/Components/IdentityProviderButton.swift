@@ -35,14 +35,20 @@ struct IdentityProviderButton: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: Metrics.height)
+            #if os(visionOS)
+            .background(.regularMaterial, in: .rect(cornerRadius: Metrics.corner))
+            #else
             .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Metrics.corner))
+            #endif
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
                     .strokeBorder(.primary.opacity(0.14), lineWidth: 1)
             }
         }
         .buttonStyle(.pressScale)
+        #if !os(visionOS)
         .glassEffectID("identity-\(provider.id)", in: namespace)
+        #endif
         .disabled(isBusy)
         .opacity(isBusy && !isRunning ? 0.45 : 1)
         .animation(.easeInOut(duration: 0.2), value: isBusy)

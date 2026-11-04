@@ -106,3 +106,11 @@ jobs:
           xcode-version: latest-stable
       - name: Build iOS
         run: bash scripts/build-ios.sh
+
+  build-visionos:
+    name: Build visionOS
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build shared SDK for Vision Pro
+        run: xcodebuild -scheme RxAuthSwiftUI -destination 'generic/platform=visionOS Simulator' CODE_SIGNING_ALLOWED=NO build

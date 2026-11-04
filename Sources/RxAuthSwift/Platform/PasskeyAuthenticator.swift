@@ -1,10 +1,10 @@
-#if canImport(AuthenticationServices) && (os(macOS) || os(iOS))
+#if canImport(AuthenticationServices) && (os(macOS) || os(iOS) || os(visionOS))
 import AuthenticationServices
 import Foundation
 
 #if os(macOS)
 import AppKit
-#elseif os(iOS)
+#elseif os(iOS) || os(visionOS)
 import UIKit
 #endif
 
