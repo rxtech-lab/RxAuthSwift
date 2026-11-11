@@ -65,7 +65,7 @@ public final class OAuthManager: Sendable {
     private let tokenStorage: TokenStorageProtocol
     private let logger: Logger
     /// Records the scopes each interactive sign-in requested (see
-    /// `sessionMissingScopes`).
+    /// `sessionMissingScopes`) and caches the last fetched user profile.
     private let scopeDefaults: UserDefaults
 
     private var refreshTimer: Timer?
@@ -105,9 +105,24 @@ public final class OAuthManager: Sendable {
                 authState = .authenticated
                 startTokenRefreshTimer()
                 logger.info("Restored existing authentication session")
+            } catch is UserInfoRejected {
+                // The server no longer accepts the stored access token (revoked
+                // or rotated). Only a refresh can tell whether the session is gone.
+                logger.notice("Stored access token was rejected; refreshing")
+                do {
+                    try await refreshTokenIfNeeded(force: true)
+                    startTokenRefreshTimer()
+                } catch {
+                    if tokenStorage.getRefreshToken() == nil {
+                        await logout()
+                    } else {
+                        keepSessionAfterTransientFailure(error)
+                    }
+                }
             } catch {
-                logger.warning("Failed to restore session: \(error.localizedDescription)")
-                authState = .unauthenticated
+                // Offline, timed out or a server error: none of these say the
+                // session is invalid, so keep it rather than force a sign-in.
+                keepSessionAfterTransientFailure(error)
             }
         } else if tokenStorage.getRefreshToken() != nil {
             do {
@@ -116,14 +131,29 @@ public final class OAuthManager: Sendable {
                 logger.info("Refreshed token from existing session")
             } catch {
                 logger.warning("Token refresh failed: \(error.localizedDescription)")
-                // Ensure stale tokens are fully cleared so that subsequent
-                // calls to checkExistingAuth() don't retry a failed refresh.
-                try? tokenStorage.clearAll()
-                authState = .unauthenticated
+                // A rejected refresh token has already been cleared by
+                // `refreshToken()`, so subsequent calls won't retry it. Anything
+                // else (offline, 5xx) keeps the session for a later retry.
+                if tokenStorage.getRefreshToken() == nil {
+                    currentUser = nil
+                    authState = .unauthenticated
+                } else {
+                    keepSessionAfterTransientFailure(error)
+                }
             }
         } else {
             authState = .unauthenticated
         }
+    }
+
+    /// Keeps the stored session through a failure that says nothing about its
+    /// validity. The user stays signed in with the last known profile, and the
+    /// refresh timer retries once the network is back.
+    private func keepSessionAfterTransientFailure(_ error: Error) {
+        logger.warning("Keeping stored session after a transient failure: \(error.localizedDescription)")
+        currentUser = currentUser ?? loadCachedUser()
+        authState = .authenticated
+        startTokenRefreshTimer()
     }
 
     /// Browser-based authorization-code + PKCE sign-in.
@@ -354,20 +384,36 @@ public final class OAuthManager: Sendable {
         }
 
         currentUser = nil
+        scopeDefaults.removeObject(forKey: cachedUserKey)
         authState = .unauthenticated
         logger.info("User logged out")
     }
 
     /// Reuses a valid access token and shares any refresh already in progress.
-    public func refreshTokenIfNeeded() async throws {
+    ///
+    /// Pass `force: true` after a server rejects the current access token: its
+    /// stored expiry can still look valid (revocation, rotation, clock skew),
+    /// so only a real refresh recovers the session.
+    ///
+    /// A refresh the server rejects (HTTP 4xx) signs the user out and posts
+    /// `.rxAuthSessionExpired`. Network and server errors (offline, timeouts,
+    /// 5xx) are thrown with the session left intact, so callers can retry.
+    public func refreshTokenIfNeeded(force: Bool = false) async throws {
         if let tokenRefreshTask {
             try await tokenRefreshTask.value
             return
         }
-        if tokenStorage.getAccessToken() != nil, !tokenStorage.isTokenExpired() {
+        if !force, tokenStorage.getAccessToken() != nil, !tokenStorage.isTokenExpired() {
             return
         }
-        let task = Task { try await self.refreshToken() }
+        let task = Task {
+            // The server rotates the refresh token on use. Keep the process
+            // alive until the new one is saved, or a suspension between the two
+            // leaves only a dead refresh token in the keychain.
+            let activity = BackgroundActivity(reason: "RxAuthSwift token refresh")
+            defer { activity.end() }
+            try await self.refreshToken()
+        }
         tokenRefreshTask = task
         defer { tokenRefreshTask = nil }
         try await task.value
@@ -399,9 +445,15 @@ public final class OAuthManager: Sendable {
         }
 
         guard httpResponse.statusCode == 200 else {
-            logger.error("Token refresh failed with status \(httpResponse.statusCode)")
+            let status = httpResponse.statusCode
+            logger.error("Token refresh failed with status \(status)")
+            guard Self.isSessionRejection(status: status) else {
+                // A 5xx, timeout or rate limit is the server's problem, not
+                // proof the refresh token is dead. Keep it for a retry.
+                throw OAuthError.networkError("Token endpoint returned HTTP \(status)")
+            }
             await handleTokenRefreshFailure()
-            throw OAuthError.tokenRefreshFailed("HTTP \(httpResponse.statusCode)")
+            throw OAuthError.tokenRefreshFailed("HTTP \(status)")
         }
 
         let tokenResponse = try JSONDecoder().decode(TokenResponse.self, from: data)
@@ -416,7 +468,14 @@ public final class OAuthManager: Sendable {
             )
         }
         try saveTokens(tokenResponse, fromRefresh: true)
-        try await fetchUserInfo()
+        do {
+            try await fetchUserInfo()
+        } catch {
+            // The new tokens are saved; a failed profile read must not turn a
+            // successful refresh into an error. Fall back to the cached profile.
+            logger.warning("User info fetch after refresh failed: \(error.localizedDescription)")
+            currentUser = currentUser ?? loadCachedUser()
+        }
 
         authState = .authenticated
         logger.info("Token refreshed successfully")
@@ -1117,10 +1176,34 @@ public final class OAuthManager: Sendable {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            if status == 401 { throw UserInfoRejected() }
             throw OAuthError.userInfoFailed("Failed to fetch user info")
         }
 
-        currentUser = try JSONDecoder().decode(User.self, from: data)
+        let user = try JSONDecoder().decode(User.self, from: data)
+        currentUser = user
+        if let encoded = try? JSONEncoder().encode(user) {
+            scopeDefaults.set(encoded, forKey: cachedUserKey)
+        }
+    }
+
+    // MARK: - Session Persistence
+
+    /// Last fetched profile, so a session restored while offline still has a user.
+    private var cachedUserKey: String {
+        "RxAuthSwift.currentUser.\(configuration.clientID).\(configuration.keychainServiceName)"
+    }
+
+    private func loadCachedUser() -> User? {
+        guard let data = scopeDefaults.data(forKey: cachedUserKey) else { return nil }
+        return try? JSONDecoder().decode(User.self, from: data)
+    }
+
+    /// Whether a failed token request means the server rejected the session
+    /// (for example `invalid_grant`), as opposed to failing to answer.
+    static func isSessionRejection(status: Int) -> Bool {
+        (400..<500).contains(status) && status != 408 && status != 429
     }
 
     private func saveTokens(_ tokenResponse: TokenResponse, fromRefresh: Bool = false) throws {
