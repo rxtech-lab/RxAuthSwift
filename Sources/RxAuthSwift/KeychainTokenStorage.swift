@@ -87,6 +87,12 @@ public final class KeychainTokenStorage: TokenStorageProtocol, @unchecked Sendab
 
         var addQuery = query
         addQuery[kSecValueData as String] = data
+        #if os(iOS)
+        // The default (`WhenUnlocked`) makes tokens unreadable when the app
+        // launches or refreshes while the device is locked, which looked like
+        // a signed-out session. Items stay protected until the first unlock.
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        #endif
 
         let status = SecItemAdd(addQuery as CFDictionary, nil)
         guard status == errSecSuccess else {
